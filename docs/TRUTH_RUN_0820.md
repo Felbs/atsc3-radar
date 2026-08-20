@@ -116,3 +116,47 @@ far tracks (9.5–11 km, ~180 m/s) remain aircraft-shaped. Untested.
 **Next, tonight:** same experiment on **Antenna C (the discone)** —
 omnidirectional, real sky view, the closest thing to the yagi's geometry
 still plugged in. Launched 21:0xZ.
+
+### Result — Antenna C (discone): INCONCLUSIVE, by instrument failure
+
+Capture USABLE (120.0 s, integrity OK, no clipping) but the illuminator is
+~20 dB weaker on the discone at 97 km: bootstrap peak ratio **11.9** vs
+89.3 on the Philips, rms 109 vs 1090. And that broke the instrument:
+
+```
+LS-fit-one-H residual (pilot alignment)   0.1 dB   <- FAILED
+  (Philips run 22 dB; 8/10 yagi capture 21 dB; REENCODER gate says >>20)
+detections                                 58 over 54 dwells, 11.5-12.7 dB
+tracks                                      0
+matches to ADS-B                            2 of 58   (GJS4454, ASH6159, one dwell each)
+NULL time-reversed / shifted +60 s          0 / 1
+VERDICT (pre-registered rule)              NOT confirmed - real does not beat the nulls
+```
+
+**Read this one differently from the Philips run.** The Philips run was a
+*valid test* that returned a negative: the pilot fit locked (22 dB),
+flattening ran, and the map was clean while aircraft were present. The
+discone run is **not a valid test at all**: the pilot fit never locked
+(0.1 dB means the synthetic lattice found no coherent pilots to fit), so
+flattening was a no-op and the "detections" are the raw self-referenced
+residue floor. Its two single-dwell "matches" at the floor, against nulls
+of 0 and 1, are exactly the chance rate the pre-registered rule exists to
+reject — and it rejected them.
+
+Instrument lesson, now a gate: a dwell whose pilot fit is below ~10 dB is
+VOID for radar purposes and must be reported as such, not processed. The
+illuminator has to be audible before the echoes can be.
+
+## Where the truth run leaves things, 21:30Z
+
+| antenna | illuminator | pilot lock | test valid? | verdict |
+|---|---|---|---|---|
+| A — Philips (indoor TV) | strong (89) | 22 dB | **yes** | **clean negative**, 19 aircraft in map |
+| C — discone (roof) | weak (12) | 0.1 dB | **no** | inconclusive |
+| B — yagi (roof, 8/10's antenna) | — | — | — | **not plugged in** |
+
+The 8/10 candidates got no trial tonight, because the antenna that
+produced them is disconnected. Their fair trial is one capture on the
+yagi with this exact recipe. Until then: four kinematically consistent
+tracks on one antenna, a clean negative on another, and an instrument
+that has now been shown to say "nothing" when there is nothing to see.

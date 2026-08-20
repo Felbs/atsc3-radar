@@ -51,6 +51,7 @@ FS = PCT.FS
 FC = PCT.FC
 LAM = 2.998e8 / FC
 BIN_M = 2.998e8 / FS
+LSH_VOID_DB = 10.0      # pilot LS-fit-one-H below this = illuminator inaudible
 
 
 def flattened(x, g, amps, signs, d0, guard, taps):
@@ -120,6 +121,7 @@ def main():
 
     n_dwell = int(0.150 * FS)
     all_det = []
+    n_void = 0
     for b in range(a.batches):
         t0 = a.t0 + b * a.frames_per_batch * (g["frame_samples"] / FS)
         try:
@@ -136,6 +138,17 @@ def main():
             x_cfo0 = fr["cfo_hz"]
             y, lsh = flattened(x, g, amps, signs, d0, PCT.PILOT_GUARD,
                                PCT.PILOT_TAPS)
+            if lsh < LSH_VOID_DB:
+                # 8/20 discone run: the illuminator was ~20 dB down and
+                # the pilot fit never locked (0.1 dB). Flattening was a
+                # no-op and the floor got reported as detections. A dwell
+                # whose pilots are inaudible is VOID for radar purposes -
+                # the illuminator must be audible before the echoes can be.
+                n_void += 1
+                print(f"   f{fi:2d} t={d0 / FS:8.4f}s lsh {lsh:5.1f} dB  "
+                      f"VOID (pilot fit < {LSH_VOID_DB:.0f} dB - illuminator "
+                      f"inaudible, not processed)")
+                continue
             det = detections(y, a.min_doppler)
             keep = [d for d in det
                     if min(abs(d["range_m"] - t) for t in teeth) > a.comb_guard_m]
@@ -183,7 +196,12 @@ def main():
         d.pop("_used", None)
 
     print(f"\n[track] {len(all_det)} off-comb detections -> "
-          f"{len(tracks)} tracks of >=3 frames")
+          f"{len(tracks)} tracks of >=3 frames"
+          + (f"   ({n_void} dwells VOID: pilot fit < {LSH_VOID_DB:.0f} dB)"
+             if n_void else ""))
+    if n_void and n_void >= 0.5 * a.batches * a.frames_per_batch:
+        print("[track] *** MOST DWELLS VOID - this capture cannot test "
+              "anything; the illuminator is inaudible on this antenna ***")
     out = []
     for k, trk in enumerate(sorted(tracks, key=len, reverse=True)):
         t = [p["t_s"] for p in trk]
