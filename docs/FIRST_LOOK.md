@@ -18,13 +18,25 @@ that is the day's second-best result.**
    = ~7.6 range bins of walk over those 3 s. A target that reports motion
    and does not move is not a target.
 3. **The numbers match the waveform, not the sky:**
-   - Doppler +199.2/+195.3 Hz (adjacent 3.9 Hz bins) brackets
-     **198.53 Hz = the symbol rate of 32K FFT + 2048 CP** at 6.912 MS/s.
-   - Range 7.37 km = **169.9 samples ≈ 32768/192 = N/Dx**, the classic
-     scattered-pilot delay ambiguity (pilot spacing Dx = 192).
+   - Doppler +199.2/+195.3 Hz (adjacent 3.9 Hz bins) brackets 198.53 Hz.
+   - Range 7.37 km = 169.9 samples ≈ 170.7.
 
    The CAF found the OFDM pilot lattice. It is exquisitely stable, it is
    strong, and it is painted on every ATSC 3.0 frame ever transmitted.
+
+   **⚠ Identification corrected, same day.** The first version of this
+   note attributed the numbers to "32K FFT + CP 2048" (symbol rate
+   198.53 Hz) and "N/Dx = 32768/192". The re-encoder scoping study pulled
+   the banked RF25 L1 decode (`lab/m8_l1_rf25.json`) and the actual
+   config is **8K FFT, GI 512, SP12_4** — and 192 is not even a legal Dx.
+   The correct derivation: SP12_4's within-symbol pilot spacing is
+   **Dx·Dy = 48 carriers → 8192/48 = 170.67 samples = 7.40 km**, and the
+   scattered lattice repeats every **Dy = 4 symbols → 794.1/4 =
+   198.53 Hz**. The arithmetic is identical (4 × 8704 = 34816 samples
+   either way), which is exactly how a wrong story survives a numeric
+   check — the L1 decode, not the numerology, is the authority. The
+   conclusion (pilot-lattice artifact, signal-borne) stands unchanged;
+   the mechanism is now the right one.
 
 ## Pre-registered prediction (written BEFORE reading the control)
 
