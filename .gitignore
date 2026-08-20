@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+lab/
+data/
+*.cs16
+*.cu8
+*.iq
