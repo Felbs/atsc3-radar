@@ -93,10 +93,13 @@ decode-remodulate reference is the real instrument.
 | pure noise → zero detections | ✅ |
 | self-reference annihilation identified | ✅ (this run) |
 | pilot-lattice artifacts identified to 4 figures | ✅ (this run) |
-| VOID capture control | pre-registered, pending |
-| gain-pair control (g2 vs g4) | pending |
+| VOID capture control | ✅ pre-registered, then confirmed (below) |
+| gain-pair control (g2 vs g4) | ✅ comb gain-invariant to 0.18 dB (below) |
+| geometry from the capture's own L1 | ✅ Step 0, see REENCODER.md |
+| pilot-only cancellation kills the comb | ✅ 23.4 dB, control 0.3 dB (below) |
+| flattening PRESERVES targets off-comb | ✅ 0.0 dB cost, pre-registered (below) |
 | ADS-B truth on a fresh capture | pending |
-| decode-remodulate reference | **the build that unlocks the rest** |
+| decode-remodulate reference | scoped; its cheapest part already works |
 
 ## Gain-pair control — 8/20 17:50Z
 
@@ -137,3 +140,62 @@ the pair by luck.
 **Scoreboard:** gain-pair control ✅. Remaining before any target claim:
 a reference clean enough to cancel the comb (the decode-remodulate
 build), then ADS-B truth on a fresh capture.
+
+## Pilot-only cancellation — 8/20 18:00Z. The comb dies; targets don't.
+
+A pilot lattice synthesized from A/322 tables alone — **no FEC, no
+constellation decisions, no LDM, nothing fitted from the data** — against
+the real capture:
+
+| | real pilots | scrambled control |
+|---|---|---|
+| comb tooth n=1 (7.40 km / +198.5 Hz) | 29.1 → **4.8 dB** | 27.9 → 28.7 dB |
+| detections / dwell | 18.3 → **2.0** | 16.7 |
+| scattered-pilot-carrier suppression | **+19.4 dB** | −0.17 dB |
+| LS-fit-one-H residual (REENCODER's own gate) | **21.2 dB** | — |
+
+**The plan reverses: flatten, don't remove.** Full pilot *removal* only
+took 3.6 dB off the tooth, and that is physics. The comb is the DFT of
+the power spectrum at 1/48 — it exists because pilot carriers hold a
+*different* power from data carriers. Delete them and a +4.5 dB bump
+becomes a −15 dB hole, which combs almost as hard in anti-phase. Subtract
+only the **excess**, β = 1 − 1/A per class, and it collapses.
+
+β = **0.4043** (scattered) and **0.6250** (common CP) come straight from
+the amplitude table with nothing fitted — and they land on the null;
+β×0.8 and β×1.2 both leave the tooth 5–10 dB higher. **A prediction
+hitting a null it did not fit** is the strongest confirmation of the
+amplitude map this project has, and it agrees with an independent
+measurement from air (SP/data +4.42 dB measured vs +4.50 tabled).
+
+Alignment, the part that was expected to be hard: bootstrap anchor →
+lattice-phase test (pre-registered `l mod Dy = 0` predicted; scored 0.982
+against 0.202–0.239 for the three wrong phases) → joint CFO/symbol-period
+refinement. Transmitter clock **−0.799 ppm**, confirmed three independent
+ways (bootstrap spacing, period fit, pilot phase-ramp slope). CFO
++431.85 Hz.
+
+### The gate that decides whether any of it is usable
+
+Flattening is a *structured, signal-correlated* subtraction — exactly the
+shape of an operation that removes the thing you're hunting along with
+the thing you're cancelling. Killing the comb says nothing about that.
+So: inject a real bistatic echo (a delayed, Doppler-shifted, attenuated
+copy of the illuminator) into real air and run the identical path.
+Pass conditions pre-registered before the run.
+
+| injection | raw | flattened | loss |
+|---|---|---|---|
+| between teeth, 11.10 km +260 Hz | 10.3 dB | **10.3 dB** | **+0.0** |
+| weak, 26.00 km −430 Hz | 2.2 dB | **2.2 dB** | **−0.0** |
+| ON a comb tooth, 7.40 km +198 Hz | 18.7 dB | 13.6 dB | +5.1 |
+| no-echo control at the probe cell | — | −4.8 dB | nothing invented |
+
+**Off the comb, flattening is free — zero measurable cost to a target.**
+On a tooth it costs 5.1 dB and the target still survives, which is the
+honest expected outcome: a target sharing a cell with the structure being
+cancelled must suffer, and that case is reported rather than graded.
+
+**So the cancellation path is cleared for target work**, and the
+decode-remodulate build is no longer a leap of faith — its cheapest
+component already does the heavy lifting.
