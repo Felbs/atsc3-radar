@@ -97,3 +97,43 @@ decode-remodulate reference is the real instrument.
 | gain-pair control (g2 vs g4) | pending |
 | ADS-B truth on a fresh capture | pending |
 | decode-remodulate reference | **the build that unlocks the rest** |
+
+## Gain-pair control — 8/20 17:50Z
+
+Identical processing on `rf25_fox_g2_0810_2257.cs16`, recorded three
+minutes after the g4 capture at a *different front-end gain*. E65/E73
+proved this rig compresses on this exact signal, and intermod
+impersonates targets — so anything that moves with gain is ours, not the
+sky's.
+
+| | g4 (rfgain 4) | g2 (rfgain 2) | Δ |
+|---|---|---|---|
+| detections / dwell | 18.1 | 16.4 | — |
+| peak SNR (mean of 20 dwells) | 27.00 dB | 27.18 dB | **−0.18 dB** |
+| peak cell | 7.37 km, +199.2 Hz | 7.37 km, +199.2 Hz | identical |
+
+**The structure is gain-invariant.** A 0.18 dB shift across a gain change
+that once moved RF33 from 0.0 % to 100.0 % FEC is no shift at all. The
+artifact lives in the transmitted waveform, exactly as the pilot-lattice
+identification says.
+
+**And the control did better than confirm — it partitioned the
+detections.** The range cells shared by both captures are, to the bin,
+the pilot ambiguity comb n × 7.402 km:
+
+```
+shared top cells   7.37  14.79  22.16  29.58  37.00  44.37  51.79  59.20
+predicted n*N/DxDy 7.40  14.80  22.21  29.61  37.01  44.41  51.81  59.22
+```
+
+Eight harmonics, eight matches, all within a 43 m bin. Meanwhile every
+cell that appears in only ONE capture is *non*-harmonic (g4-only: 2.43,
+2.47, 2.52, 4.47 km; g2-only: 2.65, 4.38, 11.71, 22.21 km). So the
+gain-invariant comb is the transmitter and the gain-dependent stragglers
+are our own front end — which is precisely the discrimination the control
+was built to provide, and it cost nothing because the E76 campaign banked
+the pair by luck.
+
+**Scoreboard:** gain-pair control ✅. Remaining before any target claim:
+a reference clean enough to cancel the comb (the decode-remodulate
+build), then ADS-B truth on a fresh capture.
