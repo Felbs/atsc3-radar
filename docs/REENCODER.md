@@ -88,3 +88,33 @@ Captures at 6.912 MS/s hit the decoder's no-op resample path — the
 reference and surveillance share one clock and one index space. Keep
 radar captures at 6.912 and the whole resampling risk class vanishes
 (the 8.0 MS/s-era captures do NOT qualify).
+
+## Step 0 — DONE 8/20 17:40Z, from the radar capture's own L1
+
+`m8_l1.py rf25_fox_g4_0810_2254.cs16 --rate 6912000 --frames 3` →
+`lab/l1_radar_capture.json`. Signalled, not remembered:
+
+| field | value |
+|---|---|
+| FFT / GI | **8192 / 512** |
+| scattered pilot pattern | index 9 = **SP12_4** → Dx=12, Dy=4 |
+| Cred | 3 |
+| SBS | first + last |
+| scattered_pilot_boost | 1 |
+| preamble_num_symbols | 1 |
+| **papr_reduction** | **0** ← no tone reservation; resynthesis is clean |
+| **miso** | **0** ← no unmodeled precoder |
+| core PLP0 | QPSK 9/15 |
+| enhanced PLP1 | 256QAM-NUC 7/15, **ldm_injection_level 10 = 5.0 dB** |
+
+**Both artifact observables reproduce from the signalled config:**
+- symbol rate = 6.912e6/(8192+512) = 794.118 Hz; lattice repeats every
+  Dy=4 symbols → **198.529 Hz** (observed 195.3–199.2, bin width 3.9)
+- within-symbol pilot spacing Dx·Dy = 48 carriers → N/48 = **170.67
+  samples = 7.402 km** (observed 7.37, bin width 43.4 m)
+
+Mechanism settled. The two risk flags the scoping study said to guard —
+PAPR tone reservation and MISO — are both **0**, so exact resynthesis is
+not blocked. LDM is confirmed at 5.0 dB injection with the enhanced layer
+in 256QAM-NUC, so the data-cell cancellation cap stands and the
+pilot-only reference is the right first build.
