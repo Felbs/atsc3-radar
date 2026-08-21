@@ -198,22 +198,38 @@ def main():
     missed = [a for a in in_window if a not in by_ac]
     print(f"\n  PREDICTED-BUT-MISSED aircraft: {len(missed)} of {len(in_window)}")
 
-    # --- NULL: time-reversed truth keeps geometry, breaks the clock
+    # --- NULL: time-reversed truth keeps geometry, breaks the clock.
+    # 8/21 LESSON: over a 10 s window a quasi-static target's prediction
+    # moves ~5 bins / ~10 Hz - inside the gate in EITHER direction - so
+    # this null scores whatever real scores and cannot lose. It stays in
+    # the output (the 8/20-21 verdicts were made under it and are not
+    # renegotiated), but the shift nulls below are the ones with power.
     rev = [(icao, cs, times[len(times) - 1 - times.index(ts)], rb, fd)
            for (icao, cs, ts, rb, fd) in preds if ts in times]
     null_hits = match(rev, det)
-    # second null: shift truth by +60 s
-    shifted = []
-    for icao, samples in truth.items():
-        for ts in times:
-            pr = predict(samples, t_launch + ts + 60.0, T, R, dRT)
-            if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
-                shifted.append((icao, samples[0][7], ts, pr[0], pr[1]))
-    null2 = match(shifted, det)
+
+    def shifted_null(dt_s):
+        sh = []
+        for icao, samples in truth.items():
+            for ts in times:
+                pr = predict(samples, t_launch + ts + dt_s, T, R, dRT)
+                if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
+                    sh.append((icao, samples[0][7], ts, pr[0], pr[1]))
+        return len(match(sh, det))
+    null2 = shifted_null(60.0)
+    shift_nulls = {dt: shifted_null(dt) for dt in (-300, -180, -60, 60, 180, 300)}
     print(f"\n  NULL CONTROLS (same detections, same aircraft, wrong clock):")
-    print(f"    time-reversed truth : {len(null_hits)} matches")
-    print(f"    truth shifted +60 s : {len(null2)} matches")
+    print(f"    time-reversed truth : {len(null_hits)} matches   "
+          f"(POWERLESS for quasi-static targets over short windows - see source)")
+    for dt, n in shift_nulls.items():
+        print(f"    truth shifted {dt:+4d} s : {n} matches")
     print(f"    real                : {len(hits)} matches")
+    worst_shift = max(shift_nulls.values())
+    print(f"\n  [next-run protocol, informational only tonight] real beats "
+          f"every shift null by >3x: "
+          f"{'YES' if len(hits) > 3 * max(worst_shift, 1) else 'NO'} "
+          f"(worst shift null {worst_shift}); "
+          f"distinct aircraft matched: {len(by_ac)}")
 
     verdict = ("DETECTION-GRADE agreement" if len(hits) >= 3 and
                len(hits) > 3 * max(len(null_hits), len(null2), 1)

@@ -160,3 +160,116 @@ produced them is disconnected. Their fair trial is one capture on the
 yagi with this exact recipe. Until then: four kinematically consistent
 tracks on one antenna, a clean negative on another, and an instrument
 that has now been shown to say "nothing" when there is nothing to see.
+
+---
+
+# The yagi run — 2026-08-21 00:21Z
+
+Felbs plugged the yagi back into B. The first launch at 22:51Z stood
+down because `sonde_rx` held the radio at priority 100 for the 00Z
+Sterling hunt — "let the sonde hunt finish, then run it." A waiter keyed
+on both the lock file and the process fired at 00:20:51Z.
+
+**Capture:** Antenna B, bias-T **true** (readback), rfgain 2 (RF25's E76
+value on this antenna), 120.0 s, integrity exact, no clipping, −14.5 dBFS,
+**bootstrap peak ratio 98.0** — the 8/10 regime. Pilot lock 17–19 dB on
+every dwell: a *valid* test. **Truth:** 17 polls, 1037 states,
+**61 aircraft**, 31 in-map outside the notch — the late arrival push.
+
+## What the radar saw, window by window
+
+Track hunt run on three windows to test the one hypothesis that could
+explain a match without an aircraft: a fixed clutter source at ~3 km in
+the yagi's beam (the 8/10 capture had a ~3 km track too).
+
+| window | strongest persistent detection | UAL1213 predicted from ADS-B | fixed clutter would be |
+|---|---|---|---|
+| t = 5–14 s | **2.73 → 2.86 km, −20 Hz**, 28 frames | 2.73 → 2.85 km, −16..−20 Hz | 3.2 km, −30 Hz |
+| t = 30–43 s | **3.08 → 3.30 km, −27..−35 Hz**, 50 dwells, 17–19 dB | 3.03 → 3.24 km, −25..−34 Hz | 3.2 km, −30 Hz |
+| t = 90–99 s | **4.81 km, −78 Hz**; *nothing* at 3.2 km | 4.52 → 4.96 km, −75..−83 Hz | 3.2 km, −30 Hz |
+
+**The detection moved with the aircraft**, 2.73 → 3.30 → 4.81 km over
+92 s, within ~50–250 m and ~5 Hz of where a 10.9 km-altitude, 217 m/s
+overflight's own telemetry said it would be, and the walk rate inside
+each window matched its Doppler (+14–16 m/s observed vs +16–18 predicted
+in the middle window). The stationary-clutter hypothesis is **falsified**
+by the late window: the 3.2 km cell is empty once the aircraft has left
+it.
+
+Other matches at the same dwell (|ΔR| < 490 m, |Δf| < 30 Hz):
+
+| aircraft | early window | middle | late | note |
+|---|---|---|---|---|
+| **UAL1213** | 32 dwells | **50** | 2 | the trajectory above |
+| **PAT11** | 22 | — | 20 | 1.26–1.6 km; a kinematic track at 1% agreement in the early window; Doppler crossed −46 → +29 Hz as it flew past |
+| FFT2269 | 11 | — | — | 2.0 km, +20 Hz |
+| SWA4809 | — | — | 6 | 12.9 km, +16 Hz |
+| JBU128 | — | — | 6 | **23.4 km**, +51 Hz vs +62 predicted |
+| RPA5689 | — | — | 5 | 4.2 km, +66 Hz |
+| SWA830 | 6 | — | — | loose (0.95 vs 0.61 km) |
+
+Totals: real matches 71 / 51 / 40 of 96 / 94 / 64 detections.
+
+## The verdict, by the rule written before the data — and why it says what it says
+
+```
+                         early   middle   late
+real                       71      51      40
+NULL time-reversed         71      51      33
+NULL shifted +60 s         17       1       0
+VERDICT (pre-registered)  NOT     NOT     NOT confirmed
+```
+
+**All three windows read NOT confirmed, and that label stands** — the
+rule was fixed before the capture and is not being renegotiated after
+it. But the rule is now understood to be broken in one specific way, and
+that is a statement about the test, not about the sky:
+
+**The time-reversal null has no power against a quasi-static target.**
+Over a 9–13 s window a high-altitude overflight's predicted cell moves
+~5 range bins and ~10 Hz — inside the match gate in either time
+direction. Reversing the clock therefore maps almost the same
+predictions onto almost the same dwells, and the null scores whatever
+real scores. It scored 71 against 71, 51 against 51, 33 against 40. A
+null that cannot lose cannot discriminate; it was the wrong control for
+a short window, and `max(null)` in the verdict rule lets it veto
+everything.
+
+**The +60 s null is the informative one.** It keeps every aircraft's
+geometry and speed and only breaks the clock by a minute — by which time
+UAL1213's predicted cell has moved ~1 km. It scored **17 / 1 / 0**
+against real's **71 / 51 / 40**. The early-window 17 is itself
+instructive: several slow, low aircraft sat near the baseline during
+those seconds (approach traffic), so close-range chance matching is not
+negligible and the gate is generous there.
+
+## What can honestly be said
+
+1. The instrument, on the yagi, produced a persistent 17–19 dB detection
+   whose position, Doppler, and walk rate followed a specific ADS-B
+   aircraft's predicted bistatic trajectory across three windows spanning
+   92 s, and the one competing explanation that was pre-registered
+   (fixed clutter at 3.2 km) is falsified by direct observation.
+2. A second aircraft (PAT11) matched in 42 dwells across two windows
+   including a 1 %-agreement kinematic track, and a third (JBU128)
+   matched at 23 km.
+3. By the pre-registered rule it is **not a confirmed detection**,
+   because one of the two nulls is structurally unable to lose. That is
+   the correct outcome of a flawed rule and it is recorded as such.
+4. It is, as of tonight, **the first truth-consistent aircraft candidate
+   this instrument has produced**, and the strongest result of the day.
+
+## Pre-registered protocol for the confirming run
+
+Written now, before any further capture:
+
+- Nulls: clock shifts of **±60, ±180, ±300 s** (all must be beaten), and
+  an **aircraft-identity permutation** (assign each aircraft's track to
+  another aircraft's timeline) repeated 50×, reporting the fraction of
+  permutations reaching the real match count.
+- Verdict: DETECTION-GRADE iff real ≥ 5 matches on ≥ 2 distinct
+  aircraft, real > 3 × every shift null, and permutation p < 0.01.
+- Trajectory test is mandatory, not optional: three windows ≥ 60 s apart;
+  the matched aircraft's detection must move with its prediction.
+- Same recipe: yagi on B, bias-T on (readback), rfgain 2, 120 s, OpenSky
+  polled ±20 s, observer coordinates never written.

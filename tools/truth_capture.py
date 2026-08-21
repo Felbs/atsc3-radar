@@ -106,6 +106,10 @@ def main():
                          "harm, E79); RF25 measured best at 2 on the yagi, "
                          "but the Philips is unmeasured at RF25")
     ap.add_argument("--ifgr", type=int, default=32)
+    ap.add_argument("--biast", default="off", choices=("on", "off"),
+                    help="power the port-B bias-T (the yagi's LNA). E86: "
+                         "bootstrap peak ratio 64.6 -> 81.0 with it on. "
+                         "Read back by the capture tool either way.")
     ap.add_argument("--pre", type=float, default=20.0,
                     help="seconds of truth polling BEFORE the capture")
     ap.add_argument("--post", type=float, default=20.0)
@@ -127,7 +131,7 @@ def main():
     time.sleep(a.pre)
 
     meta = dict(rf=a.rf, secs=a.secs, ant=a.ant, rfgain=a.rfgain,
-                ifgr=a.ifgr, rate_hz=6.912e6, capture=str(cap),
+                ifgr=a.ifgr, biast=a.biast, rate_hz=6.912e6, capture=str(cap),
                 truth=str(truth), box_deg=dict(lat=BOX_LAT, lon=BOX_LON),
                 note="observer position deliberately absent; see "
                      "GPSTuna lab_local (private)")
@@ -149,7 +153,7 @@ def main():
     try:
         cmd = [PY, CAPTURE_TOOL, "--rf", str(a.rf), "--secs", str(a.secs),
                "--rate", "6912000", "--ant", a.ant, "--ifgr", str(a.ifgr),
-               "--rfgain", str(a.rfgain), "--biast", "off", "--out", str(cap)]
+               "--rfgain", str(a.rfgain), "--biast", a.biast, "--out", str(cap)]
         meta["t_launch_utc"] = utc().isoformat(timespec="milliseconds")
         meta["t_launch_unix"] = time.time()
         print(f"[cap  ] {utc():%H:%M:%S}Z launching {a.secs:.0f} s on {a.ant} "
