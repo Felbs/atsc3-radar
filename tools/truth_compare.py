@@ -31,6 +31,7 @@ Usage: python tools/truth_compare.py <meta.json> <tracks.json>
 """
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -127,7 +128,12 @@ def main():
         return 2
     meta = json.load(open(sys.argv[1]))
     trk = json.load(open(sys.argv[2]))
-    truth = load_truth(meta["truth"])
+    truth_path = meta["truth"]
+    if not os.path.exists(truth_path):
+        # absolute paths in meta predate the passiveTuna -> radarTuna rename
+        truth_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])),
+                                  os.path.basename(truth_path))
+    truth = load_truth(truth_path)
     lat, lon, alt = observer()
     R = ecef(lat, lon, alt)
     T = ecef(TX_LAT, TX_LON, TX_ANT_AMSL_M)

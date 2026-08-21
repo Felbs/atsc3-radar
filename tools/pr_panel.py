@@ -92,8 +92,14 @@ def load_run(name):
     preds = {}
     aircraft = []
     meta = find_meta(trk["capture"])
-    if meta and os.path.exists(meta.get("truth", "")):
-        truth = TC.load_truth(meta["truth"])
+    truth_path = meta.get("truth", "") if meta else ""
+    if truth_path and not os.path.exists(truth_path):
+        # meta files store absolute paths; the 8/21 folder rename
+        # (passiveTuna -> radarTuna) orphaned them and every crosshair
+        # vanished. The truth file lives beside the meta in lab/.
+        truth_path = os.path.join(LAB, os.path.basename(truth_path))
+    if meta and os.path.exists(truth_path):
+        truth = TC.load_truth(truth_path)
         lat, lon, alt = TC.observer()
         R = TC.ecef(lat, lon, alt)
         T = TC.ecef(TC.TX_LAT, TC.TX_LON, TC.TX_ANT_AMSL_M)
