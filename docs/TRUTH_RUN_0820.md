@@ -243,6 +243,37 @@ instructive: several slow, low aircraft sat near the baseline during
 those seconds (approach traffic), so close-range chance matching is not
 negligible and the gate is generous there.
 
+## Addendum, 01:1xZ — the first of the new nulls bit, and it should have
+
+After committing the verdict above, `truth_compare` gained ±60/180/300 s
+shift nulls (informational tonight, binding on the next run). Middle
+window, same detections:
+
+```
+shifted -300 s   0      shifted +60 s    1
+shifted -180 s   0      shifted +180 s   0
+shifted  -60 s  46      shifted +300 s   0
+real            51
+```
+
+**−60 s scores 46.** Sixty seconds earlier UAL1213's predicted cell was
+~2.6 km, and with a 490 m gate (3 bins + 2 s of launch-clock slop at
+180 m/s) that still overlaps the 3.1–3.3 km detections at the edge — and
+several slow, low approach-traffic aircraft sat near the baseline, so
+close-range signatures are crowded. This is the honest size of the
+chance-match problem at ≤3 km and small Doppler: **substantial.** The
+"50 of 54 dwells" figure is therefore weaker than it sounds on its own.
+
+What it does *not* touch: the ±180 s and ±300 s nulls score 0, so the
+match is clock-locked at the minute scale; and the 92-second trajectory
+(2.73 → 3.30 → 4.81 km, 3.2 km cell empty at the end) is not something a
+crowded close-range cell can produce. That — not the per-dwell count —
+is the evidence. Two consequences for the confirming protocol, added now:
+the range gate drops its 2 s launch-clock slop by anchoring capture UTC
+to the first bootstrap (the file's own clock), and matches at R_b < 5 km
+are reported but **do not count** toward the verdict unless the
+aircraft's trajectory is tracked across ≥ 2 windows.
+
 ## What can honestly be said
 
 1. The instrument, on the yagi, produced a persistent 17–19 dB detection
