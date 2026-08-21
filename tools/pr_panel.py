@@ -155,7 +155,7 @@ def map_json(name, t_s, ds_r=2, ds_d=1):
 
 # --------------------------------------------------------------- server
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
-<title>passiveTuna scope</title>
+<title>radarTuna scope</title>
 <style>
 :root{--bg:#0e1116;--panel:#151a21;--ink:#d8dde3;--mut:#7e8996;--acc:#e0922f;--data:#56b3c7;--line:#262d36}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "IBM Plex Mono",Consolas,monospace}
@@ -175,7 +175,7 @@ td{padding:.18rem .3rem;border-bottom:1px solid #1b2128;white-space:nowrap;font-
 .leg span{display:inline-block;margin-right:.8rem}
 .ring{color:#ffd24a}.xh{color:#ff6b6b}.comb{color:#6a7580}.trk{color:var(--data)}
 </style></head><body>
-<header><h1>passiveTuna · range-Doppler scope</h1><span class="b" id="build"></span><span class="b" id="cap"></span></header>
+<header><h1>radarTuna · range-Doppler scope</h1><span class="b" id="build"></span><span class="b" id="cap"></span></header>
 <main>
 <section class="card">
  <div class="ctl">
