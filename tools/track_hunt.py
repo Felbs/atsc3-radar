@@ -72,7 +72,7 @@ def flattened(x, g, amps, signs, d0, guard, taps):
     return PCT.subtract_groups(x, [ref_sp, ref_cp], taps, w, (b_sp, b_cp)), lsh
 
 
-def detections(y, min_doppler):
+def detections(y, min_doppler, save_to=None):
     clean = PR.cancel_direct(y, y, PCT.ECA_TAPS)
     rd, rax, dax = PR.caf(y, clean, FS, PCT.MAX_RANGE_M, PCT.DOPPLER_HZ,
                           PCT.N_DOPPLER)
@@ -80,6 +80,16 @@ def detections(y, min_doppler):
            if abs(d["doppler_hz"]) >= min_doppler]
     for d in det:
         d.pop("bin_idx", None)
+    if save_to:
+        # CFAR-normalised dB (map / local noise), which is what the eye
+        # should judge - raw power is dominated by the residue pedestal
+        noise, _alpha = PR.cfar_threshold_map(rd, pfa=PCT.PFA)
+        snr = 10.0 * np.log10(np.maximum(rd, 1e-300)
+                              / np.maximum(noise, 1e-300))
+        np.save(save_to, snr.astype(np.float16))
+        np.save(os.path.join(os.path.dirname(save_to), "axes.npy"),
+                np.array([rax.astype(np.float32), None, dax.astype(np.float32)],
+                         dtype=object), allow_pickle=True)
     return det
 
 
@@ -105,7 +115,16 @@ def main():
                     help="ignore detections within this of a comb tooth")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(HERE),
                                                   "lab", "tracks.json"))
+    ap.add_argument("--save-maps", action="store_true",
+                    help="save each dwell's flattened range-Doppler map "
+                         "(dB, float16) under lab/maps/<out-stem>/ for "
+                         "pr_panel.py; ~1.4 MB per dwell")
     a = ap.parse_args()
+    maps_dir = None
+    if a.save_maps:
+        stem = os.path.splitext(os.path.basename(a.out))[0]
+        maps_dir = os.path.join(os.path.dirname(a.out), "maps", stem)
+        os.makedirs(maps_dir, exist_ok=True)
 
     npass, nfail = PP.selftest(verbose=False)
     print(f"[gate] pr_pilots selftest {npass} pass, {nfail} fail")
@@ -149,7 +168,9 @@ def main():
                       f"VOID (pilot fit < {LSH_VOID_DB:.0f} dB - illuminator "
                       f"inaudible, not processed)")
                 continue
-            det = detections(y, a.min_doppler)
+            save_to = (os.path.join(maps_dir, f"rd_{d0 / FS:09.4f}.npy")
+                       if maps_dir else None)
+            det = detections(y, a.min_doppler, save_to=save_to)
             keep = [d for d in det
                     if min(abs(d["range_m"] - t) for t in teeth) > a.comb_guard_m]
             t_abs = d0 / FS
