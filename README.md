@@ -1,7 +1,5 @@
 # atsc3-radar
 
-*(was radarTuna, and before that passiveTuna; the docs keep the old names where they are quoted.)*
-
 **Receive-only. The TV towers do the transmitting.**
 
 Passive bistatic radar for a single SDR: a local ATSC 3.0 broadcast tower
