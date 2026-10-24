@@ -42,6 +42,7 @@ PY = sys.executable
 CAPTURE_TOOL = r"Z:\src\atsc3\tools\atsc3_capture.py"
 OBS_FIX = r"Z:\src\numpy-gps\lab_local\fix_result_joint.json"
 OPENSKY = "https://opensky-network.org/api/states/all"
+TX_LAT, TX_LON = 39.336222, -76.649417   # WNUV, Television Hill (public)
 POLL_S = 10.0          # anonymous OpenSky resolution is 10 s; faster is waste
 BOX_LAT = 0.6          # +-deg, ~65 km
 BOX_LON = 0.75
@@ -123,9 +124,15 @@ def main():
     truth = LAB / f"truth_rf{a.rf}_{stamp}.adsb.jsonl"
 
     lat, lon, alt = observer()
-    box = (lat - BOX_LAT, lat + BOX_LAT, lon - BOX_LON, lon + BOX_LON)
-    print(f"[truth] OpenSky box +-{BOX_LAT}/{BOX_LON} deg around the fix "
-          f"(coordinates withheld) -> {truth.name}")
+    # 10/24 lesson: the bistatic ellipse for R_b = 30 km reaches 15 km
+    # BEYOND the tower, 110 km from here, outside a box around the fix.
+    # An aircraft on approach to BWI, lit by 750 kW from 15 km, is a
+    # strong far-range echo that a receiver-centred box never explains.
+    # The box is the union of the fix's box and the (public) tower's.
+    box = (min(lat, TX_LAT) - BOX_LAT, max(lat, TX_LAT) + BOX_LAT,
+           min(lon, TX_LON) - BOX_LON, max(lon, TX_LON) + BOX_LON)
+    print(f"[truth] OpenSky box: fix +-{BOX_LAT}/{BOX_LON} deg union tower "
+          f"+-{BOX_LAT}/{BOX_LON} deg (fix coordinates withheld) -> {truth.name}")
 
     poller = TruthPoller(box, truth)
     poller.start()

@@ -26,11 +26,18 @@ The goal that counts: aircraft that are *not* on ADS-B.
 2. `docs/FIRST_LOOK.md` — the first real air, every control, and the pilot-comb kill
 3. `docs/REENCODER.md` — the decode-remodulate reference: scoping + Step 0
 4. `docs/CANDIDATE_TRACKS.md` and `docs/TRUTH_RUN_0820.md` — candidates, truth runs, nulls
+5. `docs/TRUTH_RUN_1024.md` — the confirming run: four aircraft tracked against their own ADS-B, the rule's flaws
+6. `docs/GAIN_PAIR_1024.md` — the gain-pair control: no front-end artifacts, why clock-shift nulls fail in approach traffic, the revised rule
+7. `docs/UNMATCHED_1024.md` — first pass at the non-ADS-B goal: 31 of 32 far tracks explained, one candidate held pending the tower-end truth
 
 ## Tools
 `pr_core.py` CAF/ECA/CFAR · `pr_pilots.py` pilot-lattice synthesis ·
 `pilot_cancel_test.py` flattening experiment · `track_hunt.py` detections → tracks ·
-`truth_capture.py` capture + ADS-B truth · `truth_compare.py` truth vs detections ·
+`truth_capture.py` capture + ADS-B truth (`--rfgain 2,3` = a gain pair under one poll) ·
+`truth_compare.py` truth vs detections (shift + scramble nulls, far-range verdict) ·
+`truth_trajectory.py` matched detections per aircraft across windows · `truth_figure.py` the picture ·
+`gain_pair.py` fixed-cell artifact test across two gains ·
+`unmatched_tracks.py` the matcher inverted: tracks no ADS-B aircraft explains (ghost + truth-box rules) ·
 `pr_panel.py` the range-Doppler scope (localhost :8650)
 
 Tests: `test_pr_core.py` (synthetic truth, 11 gates) · `test_flatten_preserves.py`
