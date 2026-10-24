@@ -19,7 +19,7 @@ or written anywhere except the gitignored lab/ directory's truth file --
 and there only as the OpenSky bounding box, which is coarse (+-0.6 deg).
 
 Usage: python tools/truth_capture.py [--secs 120] [--ant "Antenna A"]
-       [--rfgain 4] [--pre 20] [--post 20]
+       [--rfgain 4 | --rfgain 2,3 (gain pair)] [--pre 20] [--post 20]
 """
 import argparse
 import json
@@ -101,7 +101,7 @@ def main():
     ap.add_argument("--secs", type=float, default=120.0)
     ap.add_argument("--ant", default="Antenna A",
                     help="8/20 port map: A = the Philips TV antenna")
-    ap.add_argument("--rfgain", type=int, default=4,
+    ap.add_argument("--rfgain", default="4",
                     help="4 = the unmeasured-carrier default (asymmetry of "
                          "harm, E79); RF25 measured best at 2 on the yagi, "
                          "but the Philips is unmeasured at RF25")
@@ -114,11 +114,13 @@ def main():
                     help="seconds of truth polling BEFORE the capture")
     ap.add_argument("--post", type=float, default=20.0)
     a = ap.parse_args()
+    # a gain PAIR (10/24 protocol): "2,3" = two captures back to back under
+    # one truth poll; each gets its own .cs16 + .meta.json, both name the
+    # shared truth file. Targets must appear in both at the same (R_b, f_d).
+    gains = [int(g) for g in str(a.rfgain).split(",")]
 
     stamp = utc().strftime("%Y%m%d_%H%M%SZ")
-    cap = LAB / f"truth_rf{a.rf}_{stamp}.cs16"
     truth = LAB / f"truth_rf{a.rf}_{stamp}.adsb.jsonl"
-    meta_p = LAB / f"truth_rf{a.rf}_{stamp}.meta.json"
 
     lat, lon, alt = observer()
     box = (lat - BOX_LAT, lat + BOX_LAT, lon - BOX_LON, lon + BOX_LON)
@@ -130,11 +132,6 @@ def main():
     print(f"[truth] polling {a.pre:.0f} s before the capture ...")
     time.sleep(a.pre)
 
-    meta = dict(rf=a.rf, secs=a.secs, ant=a.ant, rfgain=a.rfgain,
-                ifgr=a.ifgr, biast=a.biast, rate_hz=6.912e6, capture=str(cap),
-                truth=str(truth), box_deg=dict(lat=BOX_LAT, lon=BOX_LON),
-                note="observer position deliberately absent; see "
-                     "numpy-gps lab_local (private)")
     if not radio_lock.acquire("radartuna_truth",
                               f"RF{a.rf} capture + ADS-B truth", 50,
                               wait_s=30):
@@ -149,26 +146,40 @@ def main():
             radio_lock.heartbeat()
     threading.Thread(target=hb, daemon=True).start()
 
-    rc = -1
+    rc = 0
+    runs = []
     try:
-        cmd = [PY, CAPTURE_TOOL, "--rf", str(a.rf), "--secs", str(a.secs),
-               "--rate", "6912000", "--ant", a.ant, "--ifgr", str(a.ifgr),
-               "--rfgain", str(a.rfgain), "--biast", a.biast, "--out", str(cap)]
-        meta["t_launch_utc"] = utc().isoformat(timespec="milliseconds")
-        meta["t_launch_unix"] = time.time()
-        print(f"[cap  ] {utc():%H:%M:%S}Z launching {a.secs:.0f} s on {a.ant} "
-              f"rfgain {a.rfgain}")
-        p = subprocess.run(cmd, capture_output=True, text=True,
-                           timeout=a.secs + 120)       # pipe-ok: tiny log
-        rc = p.returncode
-        meta["t_done_utc"] = utc().isoformat(timespec="milliseconds")
-        meta["t_done_unix"] = time.time()
-        meta["capture_rc"] = rc
-        meta["capture_stdout"] = p.stdout[-4000:]
-        meta["capture_stderr"] = p.stderr[-2000:]
-        print(p.stdout[-1500:])
-        if rc != 0:
-            print(f"[cap  ] capture tool exit {rc}\n{p.stderr[-800:]}")
+        for gi, gain in enumerate(gains):
+            cstamp = utc().strftime("%Y%m%d_%H%M%SZ")
+            cap = LAB / f"truth_rf{a.rf}_{cstamp}.cs16"
+            meta_p = LAB / f"truth_rf{a.rf}_{cstamp}.meta.json"
+            meta = dict(rf=a.rf, secs=a.secs, ant=a.ant, rfgain=gain,
+                        ifgr=a.ifgr, biast=a.biast, rate_hz=6.912e6,
+                        capture=str(cap), truth=str(truth),
+                        gain_pair=gains, gain_pair_index=gi,
+                        box_deg=dict(lat=BOX_LAT, lon=BOX_LON),
+                        note="observer position deliberately absent; see "
+                             "numpy-gps lab_local (private)")
+            cmd = [PY, CAPTURE_TOOL, "--rf", str(a.rf), "--secs", str(a.secs),
+                   "--rate", "6912000", "--ant", a.ant, "--ifgr", str(a.ifgr),
+                   "--rfgain", str(gain), "--biast", a.biast, "--out", str(cap)]
+            meta["t_launch_utc"] = utc().isoformat(timespec="milliseconds")
+            meta["t_launch_unix"] = time.time()
+            print(f"[cap  ] {utc():%H:%M:%S}Z launching {a.secs:.0f} s on {a.ant} "
+                  f"rfgain {gain}  ({gi + 1} of {len(gains)})")
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=a.secs + 120)       # pipe-ok: tiny log
+            meta["t_done_utc"] = utc().isoformat(timespec="milliseconds")
+            meta["t_done_unix"] = time.time()
+            meta["capture_rc"] = p.returncode
+            meta["capture_stdout"] = p.stdout[-4000:]
+            meta["capture_stderr"] = p.stderr[-2000:]
+            print(p.stdout[-1500:])
+            if p.returncode != 0:
+                rc = p.returncode
+                print(f"[cap  ] capture tool exit {p.returncode}")
+                print(p.stderr[-800:])
+            runs.append((meta, meta_p, cap))
     finally:
         hb_stop.set()
         radio_lock.release("radartuna_truth")
@@ -178,17 +189,19 @@ def main():
     time.sleep(a.post)
     poller.stop.set()
     poller.join(timeout=15)
-    meta["truth_polls"] = poller.n_polls
-    meta["truth_states_total"] = poller.n_states
-    meta["truth_errors"] = poller.errors
-    if cap.exists():
-        nbytes = cap.stat().st_size
-        meta["capture_bytes"] = nbytes
-        meta["capture_seconds_by_size"] = nbytes / 4 / 6.912e6
-    json.dump(meta, open(meta_p, "w"), indent=1)
-    print(f"[done ] capture {meta.get('capture_seconds_by_size', 0):.1f} s by "
-          f"size, truth {poller.n_polls} polls / {poller.n_states} states "
-          f"/ {poller.errors} errors -> {meta_p.name}")
+    for meta, meta_p, cap in runs:
+        meta["truth_polls"] = poller.n_polls
+        meta["truth_states_total"] = poller.n_states
+        meta["truth_errors"] = poller.errors
+        if cap.exists():
+            nbytes = cap.stat().st_size
+            meta["capture_bytes"] = nbytes
+            meta["capture_seconds_by_size"] = nbytes / 4 / 6.912e6
+        json.dump(meta, open(meta_p, "w"), indent=1)
+        print(f"[done ] rfgain {meta['rfgain']}: capture "
+              f"{meta.get('capture_seconds_by_size', 0):.1f} s by size -> {meta_p.name}")
+    print(f"[done ] truth {poller.n_polls} polls / {poller.n_states} states "
+          f"/ {poller.errors} errors -> {truth.name}")
     return 0 if rc == 0 else 1
 
 
