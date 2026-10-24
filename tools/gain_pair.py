@@ -16,12 +16,17 @@ captures and sits where its ADS-B says. So the test is two-sided:
 Usage: python tools/gain_pair.py <tracks_A.json> <tracks_B.json> [truth_compare_A.json truth_compare_B.json]
 """
 import json
+import os
 import sys
 from collections import defaultdict
 
-BIN_M = 2.998e8 / 6.912e6
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import truth_compare as tc                                     # noqa: E402
+
+tc.station_arg()                 # --station=<json> rebinds the cell sizes
+BIN_M = tc.BIN_M
 R_TOL = 1.5 * BIN_M      # one bin either side
-F_TOL = 6.0              # ~1.5 Doppler bins at a 170 ms dwell
+F_TOL = 6.0 if BIN_M < 100 else 2.0   # ~1.5 Doppler bins: 170 ms dwell (ATSC) / 1 s dwell (FM)
 MIN_PERSIST = 3          # dwells in each capture to count as a persistent cell
 
 

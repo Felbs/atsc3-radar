@@ -28,6 +28,7 @@ The goal that counts: aircraft that are *not* on ADS-B.
 6. `docs/GAIN_PAIR_1024.md` — the gain-pair control: no front-end artifacts, why clock-shift nulls fail in approach traffic, the revised rule
 7. `docs/UNMATCHED_1024.md` — first pass at the non-ADS-B goal: 31 of 32 far tracks explained, one candidate held pending the tower-end truth
 8. `docs/FM_VS_ATSC3_1024.md` — FM broadcast as the illuminator on the same receiver: farther, 1 Hz Doppler, 1.2 km cells; what HD Radio does to cancellation
+9. `docs/FM_GAIN_PAIR_1024.md` — the FM gain pair: no front-end products, one aircraft on all 239 dwells, why "fixed cells" on FM are consecutive arrivals
 
 ## Tools
 `pr_core.py` CAF/ECA/CFAR · `pr_pilots.py` pilot-lattice synthesis ·
