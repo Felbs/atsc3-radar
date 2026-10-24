@@ -7,17 +7,15 @@ floods the sky; aircraft reflect it; an RSPdx and a synthesized copy of the
 tower's own waveform turn those echoes into range and Doppler. No transmitter,
 no licence, one receiver.
 
-Status (2026-10-24, evening): the confirming run and the gain-pair control
-both happened. Across four clean captures on the yagi with ADS-B truth
-logged alongside, eleven aircraft were tracked against their own
-telemetry across three windows each (best: 119 dwells over 97 s, walk
-rate matched to 1 %), an airliner was held at 29 km with zero mean range
-error, and no detection cell survived a change of RF gain, which rules
-out front-end artifacts. The pre-registered verdict rule passes in some
-windows and is shown to fail in others for a measured reason (consecutive
-aircraft on one approach route defeat clock-shift nulls); the labels stand
-as written and the rule is revised for the next run only. See
-`docs/TRUTH_RUN_1024.md` and `docs/GAIN_PAIR_1024.md`.
+Status (2026-10-24, night): the confirming run, the gain-pair control, a
+first pass at non-ADS-B targets, and an FM comparison all happened in one
+day. ATSC 3.0 off WNUV: eleven aircraft tracked against their own ADS-B
+across windows, 17-85 m range error, no cell survived a gain change. FM
+off a 50 kW broadcast station on the same receiver: eleven aircraft, one
+tracked for 116 s from 26 to 44 km, matches at 77, 79 and 97 km, 1 Hz
+Doppler error, detection-grade under the strictest rule. FM sees farther
+and reads speed; ATSC 3.0 sees where. See `docs/TRUTH_RUN_1024.md`,
+`docs/GAIN_PAIR_1024.md`, `docs/UNMATCHED_1024.md`, `docs/FM_VS_ATSC3_1024.md`.
 
 The goal that counts: aircraft that are *not* on ADS-B.
 
@@ -29,6 +27,7 @@ The goal that counts: aircraft that are *not* on ADS-B.
 5. `docs/TRUTH_RUN_1024.md` — the confirming run: four aircraft tracked against their own ADS-B, the rule's flaws
 6. `docs/GAIN_PAIR_1024.md` — the gain-pair control: no front-end artifacts, why clock-shift nulls fail in approach traffic, the revised rule
 7. `docs/UNMATCHED_1024.md` — first pass at the non-ADS-B goal: 31 of 32 far tracks explained, one candidate held pending the tower-end truth
+8. `docs/FM_VS_ATSC3_1024.md` — FM broadcast as the illuminator on the same receiver: farther, 1 Hz Doppler, 1.2 km cells; what HD Radio does to cancellation
 
 ## Tools
 `pr_core.py` CAF/ECA/CFAR · `pr_pilots.py` pilot-lattice synthesis ·
@@ -38,6 +37,8 @@ The goal that counts: aircraft that are *not* on ADS-B.
 `truth_trajectory.py` matched detections per aircraft across windows · `truth_figure.py` the picture ·
 `gain_pair.py` fixed-cell artifact test across two gains ·
 `unmatched_tracks.py` the matcher inverted: tracks no ADS-B aircraft explains (ghost + truth-box rules) ·
+`fm_radar.py` the FM illuminator (reconstructed reference, 1 s dwells) · `iq_capture.py` capture at any centre ·
+`fm_survey.py` rank the band · `stations/*.json` illuminator geometry for `--station=` ·
 `pr_panel.py` the range-Doppler scope (localhost :8650)
 
 Tests: `test_pr_core.py` (synthetic truth, 11 gates) · `test_flatten_preserves.py`
