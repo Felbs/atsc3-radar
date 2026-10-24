@@ -40,7 +40,7 @@ import radio_lock                                             # noqa: E402
 
 PY = sys.executable
 CAPTURE_TOOL = r"Z:\src\atsc3\tools\atsc3_capture.py"
-OBS_FIX = r"Z:\src\GPSTuna\lab_local\fix_result_joint.json"
+OBS_FIX = r"Z:\src\numpy-gps\lab_local\fix_result_joint.json"
 OPENSKY = "https://opensky-network.org/api/states/all"
 POLL_S = 10.0          # anonymous OpenSky resolution is 10 s; faster is waste
 BOX_LAT = 0.6          # +-deg, ~65 km
@@ -134,7 +134,7 @@ def main():
                 ifgr=a.ifgr, biast=a.biast, rate_hz=6.912e6, capture=str(cap),
                 truth=str(truth), box_deg=dict(lat=BOX_LAT, lon=BOX_LON),
                 note="observer position deliberately absent; see "
-                     "GPSTuna lab_local (private)")
+                     "numpy-gps lab_local (private)")
     if not radio_lock.acquire("radartuna_truth",
                               f"RF{a.rf} capture + ADS-B truth", 50,
                               wait_s=30):

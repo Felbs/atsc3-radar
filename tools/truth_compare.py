@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-OBS_FIX = r"Z:\src\GPSTuna\lab_local\fix_result_joint.json"
+OBS_FIX = r"Z:\src\numpy-gps\lab_local\fix_result_joint.json"
 
 # WNUV (RF25, Baltimore ATSC 3.0 lighthouse), Television Hill, Woodberry.
 # Public: FCC / Wikipedia infobox, fetched 2026-08-20. ERP 750 kW, HAAT 372.8 m.
@@ -237,19 +237,156 @@ def main():
           f"(worst shift null {worst_shift}); "
           f"distinct aircraft matched: {len(by_ac)}")
 
+    # --- PERMUTATION NULL (pre-registered 8/21 for the confirming run):
+    # each aircraft's geometric track is re-timed onto ANOTHER aircraft's
+    # timeline (a random derangement, linear re-timing of its sample times
+    # onto the other's span), 50x. Keeps every path and the population of
+    # signatures, breaks which path flies when. p = fraction of draws whose
+    # match count reaches real. Its power is REPORTED, not assumed: if the
+    # null median sits near real, it is as blind as time-reversal was.
+    rng = np.random.default_rng(20260821)
+    icaos = [k for k in truth if len(truth[k]) >= 2]
+
+    def retimed(samples, onto):
+        t0, t1 = samples[0][0], samples[-1][0]
+        u0, u1 = onto[0][0], onto[-1][0]
+        if t1 <= t0 or u1 <= u0:
+            return None
+        k = (u1 - u0) / (t1 - t0)
+        return [(u0 + (s[0] - t0) * k,) + tuple(s[1:]) for s in samples]
+
+    def permutation_null():
+        perm = rng.permutation(len(icaos))
+        if any(perm[i] == i for i in range(len(icaos))):
+            perm = np.roll(np.arange(len(icaos)), int(rng.integers(1, len(icaos))))
+        ph = []
+        for i, icao in enumerate(icaos):
+            samples = retimed(truth[icao], truth[icaos[perm[i]]])
+            if samples is None:
+                continue
+            for ts in times:
+                pr = predict(samples, t_launch + ts, T, R, dRT)
+                if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
+                    ph.append((icao, samples[0][7], ts, pr[0], pr[1]))
+        return len(match(ph, det))
+
+    # Per-aircraft CLOCK SCRAMBLE: every aircraft keeps its own path and
+    # speed but gets its own random clock offset, |dt| uniform in
+    # [45, 120] s, random sign. Unlike the global shift nulls, no two
+    # aircraft move together. Added 2026-10-24 BEFORE today's detections
+    # were examined, because the identity permutation above proved blind
+    # on the 8/21 data (median == real). Coverage loss is printed: a
+    # shifted aircraft can fall outside the ~160 s of truth polling.
+    def scramble_null():
+        ph = []
+        for icao in icaos:
+            dt = float(rng.uniform(45.0, 120.0)) * (1 if rng.random() < 0.5 else -1)
+            for ts in times:
+                pr = predict(truth[icao], t_launch + ts + dt, T, R, dRT)
+                if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
+                    ph.append((icao, truth[icao][0][7], ts, pr[0], pr[1]))
+        return len(match(ph, det)), len(ph)
+
+    N_PERM = 50
+    perm_counts = ([permutation_null() for _ in range(N_PERM)]
+                   if len(icaos) >= 3 else [])
+    scr = [scramble_null() for _ in range(N_PERM)] if icaos else []
+    scr_counts = [c for c, _ in scr]
+    scr_cov = (float(np.mean([n for _, n in scr])) / max(len(preds), 1)) if scr else 0.0
+    scr_p = (sum(1 for c in scr_counts if c >= len(hits)) / N_PERM) if scr else float("nan")
+    scr_med = float(np.median(scr_counts)) if scr else float("nan")
+    perm_p = (sum(1 for c in perm_counts if c >= len(hits)) / N_PERM
+              if perm_counts else float("nan"))
+    perm_med = float(np.median(perm_counts)) if perm_counts else float("nan")
+    print(f"    identity permutation: median {perm_med:.0f}, max "
+          f"{max(perm_counts) if perm_counts else 0}, p(>= real) = {perm_p:.2f}"
+          f"  ({N_PERM} draws)")
+    print(f"    per-aircraft clock scramble: median {scr_med:.0f}, max "
+          f"{max(scr_counts) if scr_counts else 0}, p(>= real) = {scr_p:.2f}"
+          f"  ({N_PERM} draws, prediction coverage {scr_cov:.0%} of real)")
+    if perm_counts and perm_med >= 0.5 * max(len(hits), 1):
+        print("    ** permutation null median is >= half of real: this null has "
+              "little power here and is reported as such **")
+
+    # --- close-range rule (8/21 addendum): matches at R_b < 5 km are
+    # crowded by approach traffic and do NOT count toward the verdict
+    # unless the aircraft is tracked across >= 2 windows (judged across
+    # the per-window runs, outside this script).
+    far_hits = [h for h in hits if h[3] >= 5e3]
+    far_ac = sorted({h[1] for h in far_hits})
+    # the same rule applied to the nulls: a null scored on the crowded
+    # close-range cells would veto a far-range result it never tested.
+    det_far = [d for d in det if d["range_m"] >= 5e3]
+    preds_far = [p for p in preds if p[3] >= 5e3]
+
+    def shifted_null_far(dt_s):
+        sh = []
+        for icao, samples in truth.items():
+            for ts in times:
+                pr = predict(samples, t_launch + ts + dt_s, T, R, dRT)
+                if pr and 5e3 <= pr[0] < 60e3 and abs(pr[1]) < 1000:
+                    sh.append((icao, samples[0][7], ts, pr[0], pr[1]))
+        return len(match(sh, det_far))
+    shift_far = {dt: shifted_null_far(dt) for dt in (-300, -180, -60, 60, 180, 300)}
+
+    def scramble_far():
+        ph = []
+        for icao in icaos:
+            dt = float(rng.uniform(45.0, 120.0)) * (1 if rng.random() < 0.5 else -1)
+            for ts in times:
+                pr = predict(truth[icao], t_launch + ts + dt, T, R, dRT)
+                if pr and 5e3 <= pr[0] < 60e3 and abs(pr[1]) < 1000:
+                    ph.append((icao, truth[icao][0][7], ts, pr[0], pr[1]))
+        return len(match(ph, det_far))
+    scr_far = [scramble_far() for _ in range(N_PERM)] if icaos else []
+    scr_far_p = (sum(1 for c in scr_far if c >= len(far_hits)) / N_PERM) if scr_far else float("nan")
+    worst_shift_far = max(shift_far.values())
+    print(f"    R_b >= 5 km only: detections {len(det_far)}, real matches {len(far_hits)}, "
+          f"shift nulls " + " ".join(f"{k:+d}s:{v}" for k, v in shift_far.items())
+          + f", scramble median {float(np.median(scr_far)) if scr_far else 0:.0f} "
+          f"max {max(scr_far) if scr_far else 0} p(>= real) = {scr_far_p:.2f}")
+    print(f"    matches at R_b >= 5 km: {len(far_hits)} on {len(far_ac)} aircraft; "
+          f"at R_b < 5 km (count only if tracked across windows): "
+          f"{len(hits) - len(far_hits)}")
+
+    # 8/20-21 rule, kept for comparability with those nights
     verdict = ("DETECTION-GRADE agreement" if len(hits) >= 3 and
-               len(hits) > 3 * max(len(null_hits), len(null2), 1)
+               len(hits) > 3 * max(len(null_hits), null2, 1)
                else "NOT confirmed - real does not beat the nulls decisively"
                if hits else "NO matches - nothing we see is where the ADS-B "
                             "aircraft are (or nothing squawking was in the beam)")
-    print(f"\n  VERDICT: {verdict}")
+    # confirming-run rule, pre-registered 8/21 01:1xZ (TRUTH_RUN_0820.md)
+    beats_shifts = len(hits) > 3 * max(worst_shift, 1)
+    verdict2 = ("DETECTION-GRADE" if len(hits) >= 5 and len(by_ac) >= 2 and
+                beats_shifts and scr and scr_p < 0.01
+                else "NOT confirmed")
+    beats_shifts_far = len(far_hits) > 3 * max(worst_shift_far, 1)
+    verdict2_far = ("DETECTION-GRADE" if len(far_hits) >= 5 and len(far_ac) >= 2
+                    and beats_shifts_far and scr_far and scr_far_p < 0.01
+                    else "NOT confirmed")
+    print(f"\n  VERDICT (8/20 rule):        {verdict}")
+    print(f"  VERDICT (8/21 confirming):  {verdict2}   "
+          f"[real>=5: {len(hits) >= 5}, aircraft>=2: {len(by_ac) >= 2}, "
+          f"beats shift nulls 3x: {beats_shifts}, scramble p<0.01: "
+          f"{scr_p < 0.01 if scr else 'n/a'} (identity-perm p {perm_p:.2f}, blind)]")
+    print(f"  VERDICT (8/21, R_b>=5 km only): {verdict2_far}   "
+          f"[real>=5: {len(far_hits) >= 5}, aircraft>=2: {len(far_ac) >= 2}, "
+          f"beats far shift nulls 3x: {beats_shifts_far} (worst {worst_shift_far}), "
+          f"far scramble p<0.01: {scr_far_p < 0.01 if scr_far else 'n/a'}]")
     out = dict(n_aircraft=len(truth), n_in_map=len(in_window),
                n_detections=len(det), matches=len(hits),
                matched_aircraft={k: len(v) for k, v in by_ac.items()},
+               matches_far=len(far_hits), matched_aircraft_far=far_ac,
                missed_aircraft=missed, null_reversed=len(null_hits),
-               null_shift60=len(null2), r_gate_m=R_GATE, f_gate_hz=F_GATE,
+               null_shift60=null2, shift_nulls={str(k): v for k, v in shift_nulls.items()},
+               perm_counts=perm_counts, perm_p=perm_p,
+               scramble_counts=scr_counts, scramble_p=scr_p, scramble_coverage=scr_cov,
+               r_gate_m=R_GATE, f_gate_hz=F_GATE,
                t0_uncertainty_s=T0_UNC_S, tx_antenna_amsl_m_ESTIMATE=TX_ANT_AMSL_M,
-               verdict=verdict)
+               verdict=verdict, verdict_confirming=verdict2,
+               verdict_confirming_far=verdict2_far,
+               shift_nulls_far={str(k): v for k, v in shift_far.items()},
+               scramble_counts_far=scr_far, scramble_p_far=scr_far_p)
     outp = Path(sys.argv[2]).with_name("truth_compare.json")
     json.dump(out, open(outp, "w"), indent=1)
     print(f"  -> {outp}")
