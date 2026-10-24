@@ -7,15 +7,17 @@ floods the sky; aircraft reflect it; an RSPdx and a synthesized copy of the
 tower's own waveform turn those echoes into range and Doppler. No transmitter,
 no licence, one receiver.
 
-Status (2026-10-24): the confirming run happened. On the yagi, with
-ADS-B truth logged alongside, four aircraft were tracked against their own
-telemetry across windows (one across all three, 6.4 -> 2.8 km over 88 s),
-and an airliner at 15 km excess range was held for 55 dwells with 78 m /
-1.6 Hz mean error. By the pre-registered far-range criterion (R_b >= 5 km,
-nulls on the same cells) that is **DETECTION-GRADE in all three windows**;
-on the whole field, crowded close-range cells let the +-60 s nulls veto it.
-A gain-pair control is still owed before "confirmed" goes unqualified.
-See `docs/TRUTH_RUN_1024.md`.
+Status (2026-10-24, evening): the confirming run and the gain-pair control
+both happened. Across four clean captures on the yagi with ADS-B truth
+logged alongside, eleven aircraft were tracked against their own
+telemetry across three windows each (best: 119 dwells over 97 s, walk
+rate matched to 1 %), an airliner was held at 29 km with zero mean range
+error, and no detection cell survived a change of RF gain, which rules
+out front-end artifacts. The pre-registered verdict rule passes in some
+windows and is shown to fail in others for a measured reason (consecutive
+aircraft on one approach route defeat clock-shift nulls); the labels stand
+as written and the rule is revised for the next run only. See
+`docs/TRUTH_RUN_1024.md` and `docs/GAIN_PAIR_1024.md`.
 
 The goal that counts: aircraft that are *not* on ADS-B.
 

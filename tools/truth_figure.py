@@ -27,7 +27,9 @@ INK, INK2, GRID = "#1f2328", "#59636e", "#d0d7de"
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--focus")]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    rmax = [float(a.split("=", 1)[1]) for a in sys.argv[1:] if a.startswith("--rmax=")]
+    rmax = rmax[0] if rmax else 20e3
     focus = [a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--focus=")]
     focus = focus[0].split(",") if focus else []
     meta = json.load(open(args[0]))
@@ -78,7 +80,7 @@ def main():
     axd = fig.add_subplot(gs[1, 1], sharex=axr)
 
     # --- panel A: the dwell
-    RMAX, DMAX = 20e3, 320.0
+    RMAX, DMAX = rmax, 320.0
     ri = rng_m <= RMAX
     di = np.abs(dop_hz) <= DMAX
     sub = m[np.ix_(ri, di)]
