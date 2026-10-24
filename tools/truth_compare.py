@@ -50,6 +50,42 @@ FS = 6.912e6
 BIN_M = 2.998e8 / FS
 C = 2.998e8
 
+MAX_RANGE_M = 60e3          # map extent used for "in map" predictions
+STATION_NAME = "RF25 / WNUV (97 km)"
+NOTCH_HZ = 15.0
+R_GATE_OVERRIDE = None       # a station json may set the match gates
+F_GATE_OVERRIDE = None
+
+
+def configure(station_json):
+    """Point the geometry at another illuminator (FM etc.). Sets the module
+    globals every tool reads: TX_LAT/LON/ANT, FC, LAM, FS, BIN_M, map
+    extent and match gates. Call before anything else."""
+    global TX_LAT, TX_LON, TX_ANT_AMSL_M, FC, LAM, FS, BIN_M, MAX_RANGE_M
+    global R_GATE_OVERRIDE, F_GATE_OVERRIDE, STATION_NAME, NOTCH_HZ
+    st = json.load(open(station_json))
+    STATION_NAME = st.get("short_name", st.get("name", "station"))
+    NOTCH_HZ = float(st.get("notch_hz", 15.0))
+    TX_LAT, TX_LON = float(st["tx_lat"]), float(st["tx_lon"])
+    TX_ANT_AMSL_M = float(st.get("tx_alt_m", 300.0))
+    FC = float(st["fc_hz"]); LAM = 2.998e8 / FC
+    FS = float(st["fs_hz"]); BIN_M = 2.998e8 / FS
+    MAX_RANGE_M = float(st.get("max_range_m", MAX_RANGE_M))
+    R_GATE_OVERRIDE = st.get("r_gate_m"); F_GATE_OVERRIDE = st.get("f_gate_hz")
+    return st
+
+
+def station_arg():
+    """--station=<json> anywhere on argv: configure and strip it."""
+    keep = []
+    for a in sys.argv[1:]:
+        if a.startswith("--station="):
+            configure(a.split("=", 1)[1])
+        else:
+            keep.append(a)
+    sys.argv[1:] = keep
+
+
 # WGS84
 _A = 6378137.0
 _E2 = 6.69437999014e-3
@@ -123,6 +159,7 @@ def predict(samples, t, T, R, dRT):
 
 
 def main():
+    station_arg()
     if len(sys.argv) < 3:
         print(__doc__)
         return 2
@@ -163,11 +200,11 @@ def main():
             if pr is None:
                 continue
             rb, fd = pr
-            if 0 < rb < 60e3 and abs(fd) < 1000:
+            if 0 < rb < MAX_RANGE_M and abs(fd) < 1000:
                 preds.append((icao, samples[0][7], ts, rb, fd))
     in_window = sorted({p[0] for p in preds})
     print(f"\n  aircraft whose predicted (R_b, f_d) fall INSIDE our map "
-          f"(<60 km excess, |f_d|<1 kHz): {len(in_window)}")
+          f"(<{MAX_RANGE_M/1e3:.0f} km excess, |f_d|<1 kHz): {len(in_window)}")
     for icao in in_window:
         ps = [p for p in preds if p[0] == icao]
         print(f"    {icao} {ps[0][1]:8s}  R_b {min(p[3] for p in ps) / 1e3:6.2f}"
@@ -175,8 +212,8 @@ def main():
               f"f_d {min(p[4] for p in ps):+7.1f}..{max(p[4] for p in ps):+7.1f} Hz")
 
     # --- match: detection within gate of a prediction at the same dwell
-    R_GATE = 3 * BIN_M + 180 * T0_UNC_S      # bins + timing slop
-    F_GATE = 30.0
+    R_GATE = R_GATE_OVERRIDE or (3 * BIN_M + 180 * T0_UNC_S)      # bins + timing slop
+    F_GATE = F_GATE_OVERRIDE or 30.0
 
     def match(preds_, dets_):
         hits = []
@@ -219,7 +256,7 @@ def main():
         for icao, samples in truth.items():
             for ts in times:
                 pr = predict(samples, t_launch + ts + dt_s, T, R, dRT)
-                if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
+                if pr and 0 < pr[0] < MAX_RANGE_M and abs(pr[1]) < 1000:
                     sh.append((icao, samples[0][7], ts, pr[0], pr[1]))
         return len(match(sh, det))
     null2 = shifted_null(60.0)
@@ -266,7 +303,7 @@ def main():
                 continue
             for ts in times:
                 pr = predict(samples, t_launch + ts, T, R, dRT)
-                if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
+                if pr and 0 < pr[0] < MAX_RANGE_M and abs(pr[1]) < 1000:
                     ph.append((icao, samples[0][7], ts, pr[0], pr[1]))
         return len(match(ph, det))
 
@@ -283,7 +320,7 @@ def main():
             dt = float(rng.uniform(45.0, 120.0)) * (1 if rng.random() < 0.5 else -1)
             for ts in times:
                 pr = predict(truth[icao], t_launch + ts + dt, T, R, dRT)
-                if pr and 0 < pr[0] < 60e3 and abs(pr[1]) < 1000:
+                if pr and 0 < pr[0] < MAX_RANGE_M and abs(pr[1]) < 1000:
                     ph.append((icao, truth[icao][0][7], ts, pr[0], pr[1]))
         return len(match(ph, det)), len(ph)
 
@@ -324,7 +361,7 @@ def main():
         for icao, samples in truth.items():
             for ts in times:
                 pr = predict(samples, t_launch + ts + dt_s, T, R, dRT)
-                if pr and 5e3 <= pr[0] < 60e3 and abs(pr[1]) < 1000:
+                if pr and 5e3 <= pr[0] < MAX_RANGE_M and abs(pr[1]) < 1000:
                     sh.append((icao, samples[0][7], ts, pr[0], pr[1]))
         return len(match(sh, det_far))
     shift_far = {dt: shifted_null_far(dt) for dt in (-300, -180, -60, 60, 180, 300)}
@@ -335,7 +372,7 @@ def main():
             dt = float(rng.uniform(45.0, 120.0)) * (1 if rng.random() < 0.5 else -1)
             for ts in times:
                 pr = predict(truth[icao], t_launch + ts + dt, T, R, dRT)
-                if pr and 5e3 <= pr[0] < 60e3 and abs(pr[1]) < 1000:
+                if pr and 5e3 <= pr[0] < MAX_RANGE_M and abs(pr[1]) < 1000:
                     ph.append((icao, truth[icao][0][7], ts, pr[0], pr[1]))
         return len(match(ph, det_far))
     scr_far = [scramble_far() for _ in range(N_PERM)] if icaos else []

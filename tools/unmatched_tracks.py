@@ -45,7 +45,7 @@ MIN_PTS = 8
 R_MIN = 5e3
 NOTCH = 15.0
 R_GATE2 = 2 * (3 * tc.BIN_M + 360)
-F_GATE2 = 60.0
+F_GATE2 = 60.0   # rebound in main() when a station sets gates
 TWIN_F = 10.0
 TWIN_R = (0.0, 4e3)
 
@@ -62,6 +62,7 @@ def load_truth_with_source(path):
 
 
 def main():
+    tc.station_arg()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     gp = [a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--gainpair=")]
     meta = json.load(open(args[0]))
@@ -100,17 +101,17 @@ def main():
             cs = samples[0][7] or icao
             for ts in times:
                 pr = tc.predict(samples, t_launch + ts, T, R, dRT)
-                if pr and 0 < pr[0] < 70e3 and abs(pr[1]) < 1200:
+                if pr and 0 < pr[0] < tc.MAX_RANGE_M + 10e3 and abs(pr[1]) < 1200:
                     pred[ts].append((icao, cs, pr[0], pr[1]))
         # matched detections (normal gate) for the twin test and the miss rate
-        R_GATE = 3 * tc.BIN_M + 360
+        R_GATE = tc.R_GATE_OVERRIDE or (3 * tc.BIN_M + 360)
         matched = []
         for d in det:
             for icao, cs, rb, fd in pred[d["t_s"]]:
                 if abs(d["range_m"] - rb) < R_GATE and abs(d["doppler_hz"] - fd) < 30:
                     matched.append((d["t_s"], rb, fd, cs))
                     break
-        in_map = {icao for ts in times for icao, _, rb, fd in pred[ts] if rb < 60e3 and abs(fd) < 1000}
+        in_map = {icao for ts in times for icao, _, rb, fd in pred[ts] if rb < tc.MAX_RANGE_M and abs(fd) < 1000}
         seen = {cs for _, _, _, cs in matched}
         print(f"\n[{w}] {len(det)} detections, {len(matched)} matched; "
               f"{len(in_map)} aircraft in map, {len(seen)} seen "

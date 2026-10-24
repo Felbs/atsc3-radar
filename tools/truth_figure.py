@@ -27,6 +27,7 @@ INK, INK2, GRID = "#1f2328", "#59636e", "#d0d7de"
 
 
 def main():
+    tc.station_arg()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     rmax = [float(a.split("=", 1)[1]) for a in sys.argv[1:] if a.startswith("--rmax=")]
     rmax = rmax[0] if rmax else 20e3
@@ -48,8 +49,8 @@ def main():
     dRT = float(np.linalg.norm(T - R))
     t_launch = float(meta["t_launch_unix"])
     cs_of = {k: v[0][7] or k for k, v in truth.items()}
-    R_GATE = 3 * tc.BIN_M + 180 * 2.0
-    F_GATE = 30.0
+    R_GATE = tc.R_GATE_OVERRIDE or (3 * tc.BIN_M + 180 * 2.0)
+    F_GATE = tc.F_GATE_OVERRIDE or 30.0
 
     # all detections, all windows
     dets, windows = [], []
@@ -109,8 +110,8 @@ def main():
         axm.annotate(cs_of[icao], (pr[1], pr[0] / 1e3), xytext=(10, 6), textcoords="offset points",
                      color=INK, fontsize=10, fontweight="bold",
                      bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=c, lw=1.2))
-    axm.axvspan(-15, 15, color="#ffffff", alpha=0.55, lw=0)
-    axm.text(0, RMAX / 1e3 * 0.985, "clutter notch ±15 Hz", ha="center", va="top", fontsize=8, color=INK2)
+    axm.axvspan(-tc.NOTCH_HZ, tc.NOTCH_HZ, color="#ffffff", alpha=0.55, lw=0)
+    axm.text(0, RMAX / 1e3 * 0.985, f"clutter notch ±{tc.NOTCH_HZ:.0f} Hz", ha="center", va="top", fontsize=8, color=INK2)
     axm.set_xlabel("bistatic Doppler (Hz)   + = closing", color=INK)
     axm.set_ylabel("excess bistatic range (km)", color=INK)
     axm.set_title(f"one dwell, t = {t_map:.2f} s   (shade = dB over local noise, 0 to 20)",
@@ -156,7 +157,7 @@ def main():
     plt.setp(axr.get_xticklabels(), visible=False)
 
     fig.suptitle(f"atsc3-radar truth run {Path(args[0]).stem.split('_')[-1].replace('.meta', '')}  "
-                 f"RF25 / WNUV (97 km)  {meta['ant']}  rfgain {meta['rfgain']}  bias-T {meta['biast']}",
+                 f"{tc.STATION_NAME}  {meta['ant']}  rfgain {meta['rfgain']}  bias-T {meta['biast']}",
                  fontsize=13, color=INK, x=0.055, ha="left")
     fig.savefig(out, facecolor="white")
     print("->", out, "dwell", t_map, "detections at dwell", len(dd), "predictions in view", len(px))

@@ -1,0 +1,16 @@
+{
+ "name": "WFLS-FM 93.3 Fredericksburg VA (FCC public record)",
+ "fc_hz": 93300000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.312888888888885,
+ "tx_lon": -77.43858333333334,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground ~60 m + tower; <1/10 range bin at these ranges",
+ "erp_kw": 50.0,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed (discriminate, low-pass MPX, remodulate)",
+ "short_name": "93.3 FM / WFLS",
+ "notch_hz": 5.0
+}

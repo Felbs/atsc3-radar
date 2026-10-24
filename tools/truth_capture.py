@@ -40,6 +40,7 @@ import radio_lock                                             # noqa: E402
 
 PY = sys.executable
 CAPTURE_TOOL = r"Z:\src\atsc3\tools\atsc3_capture.py"
+IQ_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iq_capture.py")
 OBS_FIX = r"Z:\src\numpy-gps\lab_local\fix_result_joint.json"
 OPENSKY = "https://opensky-network.org/api/states/all"
 TX_LAT, TX_LON = 39.336222, -76.649417   # WNUV, Television Hill (public)
@@ -99,6 +100,12 @@ class TruthPoller(threading.Thread):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rf", type=int, default=25)
+    ap.add_argument("--fc", type=float, default=None,
+                    help="centre frequency in Hz for a NON-ATSC illuminator "
+                         "(FM etc.): uses iq_capture.py instead of the ATSC tool")
+    ap.add_argument("--rate", type=float, default=None,
+                    help="sample rate for --fc captures (default 2e6)")
+    ap.add_argument("--tag", default=None, help="file tag (default rf<N> or fm<MHz>)")
     ap.add_argument("--secs", type=float, default=120.0)
     ap.add_argument("--ant", default="Antenna A",
                     help="8/20 port map: A = the Philips TV antenna")
@@ -121,7 +128,9 @@ def main():
     gains = [int(g) for g in str(a.rfgain).split(",")]
 
     stamp = utc().strftime("%Y%m%d_%H%M%SZ")
-    truth = LAB / f"truth_rf{a.rf}_{stamp}.adsb.jsonl"
+    rate = a.rate or (6.912e6 if a.fc is None else 2.0e6)
+    tag = a.tag or (f"rf{a.rf}" if a.fc is None else f"fm{a.fc/1e6:.1f}")
+    truth = LAB / f"truth_{tag}_{stamp}.adsb.jsonl"
 
     lat, lon, alt = observer()
     # 10/24 lesson: the bistatic ellipse for R_b = 30 km reaches 15 km
@@ -158,18 +167,24 @@ def main():
     try:
         for gi, gain in enumerate(gains):
             cstamp = utc().strftime("%Y%m%d_%H%M%SZ")
-            cap = LAB / f"truth_rf{a.rf}_{cstamp}.cs16"
-            meta_p = LAB / f"truth_rf{a.rf}_{cstamp}.meta.json"
-            meta = dict(rf=a.rf, secs=a.secs, ant=a.ant, rfgain=gain,
-                        ifgr=a.ifgr, biast=a.biast, rate_hz=6.912e6,
+            cap = LAB / f"truth_{tag}_{cstamp}.cs16"
+            meta_p = LAB / f"truth_{tag}_{cstamp}.meta.json"
+            meta = dict(rf=a.rf if a.fc is None else None, fc_hz=a.fc,
+                        secs=a.secs, ant=a.ant, rfgain=gain,
+                        ifgr=a.ifgr, biast=a.biast, rate_hz=rate,
                         capture=str(cap), truth=str(truth),
                         gain_pair=gains, gain_pair_index=gi,
                         box_deg=dict(lat=BOX_LAT, lon=BOX_LON),
                         note="observer position deliberately absent; see "
                              "numpy-gps lab_local (private)")
-            cmd = [PY, CAPTURE_TOOL, "--rf", str(a.rf), "--secs", str(a.secs),
-                   "--rate", "6912000", "--ant", a.ant, "--ifgr", str(a.ifgr),
-                   "--rfgain", str(gain), "--biast", a.biast, "--out", str(cap)]
+            if a.fc is None:
+                cmd = [PY, CAPTURE_TOOL, "--rf", str(a.rf), "--secs", str(a.secs),
+                       "--rate", "6912000", "--ant", a.ant, "--ifgr", str(a.ifgr),
+                       "--rfgain", str(gain), "--biast", a.biast, "--out", str(cap)]
+            else:
+                cmd = [PY, IQ_TOOL, "--fc", str(a.fc), "--secs", str(a.secs),
+                       "--rate", str(rate), "--ant", a.ant, "--ifgr", str(a.ifgr),
+                       "--rfgain", str(gain), "--biast", a.biast, "--out", str(cap)]
             meta["t_launch_utc"] = utc().isoformat(timespec="milliseconds")
             meta["t_launch_unix"] = time.time()
             print(f"[cap  ] {utc():%H:%M:%S}Z launching {a.secs:.0f} s on {a.ant} "
@@ -203,7 +218,7 @@ def main():
         if cap.exists():
             nbytes = cap.stat().st_size
             meta["capture_bytes"] = nbytes
-            meta["capture_seconds_by_size"] = nbytes / 4 / 6.912e6
+            meta["capture_seconds_by_size"] = nbytes / 4 / rate
         json.dump(meta, open(meta_p, "w"), indent=1)
         print(f"[done ] rfgain {meta['rfgain']}: capture "
               f"{meta.get('capture_seconds_by_size', 0):.1f} s by size -> {meta_p.name}")

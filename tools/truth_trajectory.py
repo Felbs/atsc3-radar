@@ -21,6 +21,7 @@ import truth_compare as tc                                     # noqa: E402
 
 
 def main():
+    tc.station_arg()
     meta = json.load(open(sys.argv[1]))
     truth_path = meta["truth"]
     if not os.path.exists(truth_path):
@@ -32,8 +33,8 @@ def main():
     T = tc.ecef(tc.TX_LAT, tc.TX_LON, tc.TX_ANT_AMSL_M)
     dRT = float(np.linalg.norm(T - R))
     t_launch = float(meta["t_launch_unix"])
-    R_GATE = 3 * tc.BIN_M + 180 * 2.0
-    F_GATE = 30.0
+    R_GATE = tc.R_GATE_OVERRIDE or (3 * tc.BIN_M + 180 * 2.0)
+    F_GATE = tc.F_GATE_OVERRIDE or 30.0
 
     per_ac = {}          # icao -> window -> list of rows
     cs_of = {}
