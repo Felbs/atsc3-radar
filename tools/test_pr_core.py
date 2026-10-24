@@ -563,7 +563,7 @@ TESTS = [
 
 def main():
     print("=" * 78)
-    print("radarTuna pr_core -- synthetic ground truth")
+    print("atsc3-radar pr_core -- synthetic ground truth")
     print(f"  fs {FS/1e6:.3f} MS/s   fc {FC/1e6:.1f} MHz   dwell "
           f"{N_SAMP/FS*1e3:.1f} ms ({N_SAMP} samples)")
     print(f"  truth: delay {TGT_DELAY} samples = {TGT_DELAY*PR.C_LIGHT/FS:.1f} m, "

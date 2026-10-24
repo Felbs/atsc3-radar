@@ -1,4 +1,6 @@
-# radarTuna
+# atsc3-radar
+
+*(was radarTuna, and before that passiveTuna; the docs keep the old names where they are quoted.)*
 
 **Receive-only. The TV towers do the transmitting.**
 

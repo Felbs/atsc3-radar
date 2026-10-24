@@ -76,7 +76,7 @@ class TruthPoller(threading.Thread):
             t0 = time.time()
             try:
                 req = urllib.request.Request(
-                    url, headers={"User-Agent": "radarTuna-truth/0.1"})
+                    url, headers={"User-Agent": "atsc3-radar-truth/0.1"})
                 with urllib.request.urlopen(req, timeout=8) as r:
                     payload = json.load(r)
                 states = payload.get("states") or []
