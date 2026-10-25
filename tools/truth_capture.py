@@ -184,7 +184,8 @@ def main():
             else:
                 cmd = [PY, IQ_TOOL, "--fc", str(a.fc), "--secs", str(a.secs),
                        "--rate", str(rate), "--ant", a.ant, "--ifgr", str(a.ifgr),
-                       "--rfgain", str(gain), "--biast", a.biast, "--out", str(cap)]
+                       "--rfgain", str(gain), "--biast", a.biast, "--out", str(cap),
+                       "--no-lock"]
             meta["t_launch_utc"] = utc().isoformat(timespec="milliseconds")
             meta["t_launch_unix"] = time.time()
             print(f"[cap  ] {utc():%H:%M:%S}Z launching {a.secs:.0f} s on {a.ant} "

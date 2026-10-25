@@ -32,7 +32,22 @@ ap.add_argument("--rfgain", type=int, default=None,
 ap.add_argument("--biast", default=None, choices=("on", "off"))
 ap.add_argument("--allow-clipping", action="store_true")
 ap.add_argument("--out", required=True)
+ap.add_argument("--no-lock", action="store_true",
+                help="caller already holds radio_lock (truth_capture does)")
 a = ap.parse_args()
+
+# Single-tenant radio: take the fleet lock unless the caller holds it.
+# 10/24: a survey run without this tried to open the RSPdx under a
+# priority-100 radiosonde hunt.
+_locked = False
+if not a.no_lock:
+    sys.path.insert(0, r"Z:\src\gr-radiotuna\tools")
+    import radio_lock
+    if not radio_lock.acquire("iq_capture", f"capture {a.fc/1e6:.3f} MHz", 50, wait_s=5):
+        h = radio_lock.status() or {}
+        print(f"[lock] radio held by {h.get('owner', '?')} ({h.get('purpose', '')}) - not capturing")
+        sys.exit(3)
+    _locked = True
 
 os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
 sdr = SoapySDR.Device("driver=sdrplay")
@@ -96,6 +111,8 @@ with open(a.out, "wb") as f:
             print(f"readStream {r.ret}", flush=True)
 wall = time.time() - t_start
 sdr.deactivateStream(st); sdr.closeStream(st); del sdr
+if _locked:
+    radio_lock.release("iq_capture")
 
 frac = 100.0 * n_full / max(1, 2 * got)
 dbfs = 20.0 * np.log10(peak / 32768.0) if peak else -999.0

@@ -1,0 +1,14 @@
+{
+ "name": "WETA-TV RF31 Washington DC (FCC)",
+ "short_name": "RF31 / WETA (8-VSB)",
+ "fc_hz": 575000000.0,
+ "fs_hz": 7174825.174825176,
+ "tx_lat": 38.950278,
+ "tx_lon": -77.079444,
+ "tx_alt_m": 357.0,
+ "tx_alt_note": "ESTIMATE: HAAT + ~100 m ground; a 50 m error is under one range bin at these ranges",
+ "erp_kw": 1000,
+ "max_range_m": 60000.0,
+ "notch_hz": 15.0,
+ "illuminator": "ATSC 1.0 8-VSB; reference rebuilt from symbol decisions (vsb_ref.py)"
+}

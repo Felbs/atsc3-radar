@@ -1,0 +1,14 @@
+{
+ "name": "WMAR-TV RF27 Baltimore MD (FCC)",
+ "short_name": "RF27 / WMAR (8-VSB)",
+ "fc_hz": 551000000.0,
+ "fs_hz": 7174825.174825176,
+ "tx_lat": 39.334722,
+ "tx_lon": -76.650556,
+ "tx_alt_m": 407.0,
+ "tx_alt_note": "ESTIMATE: HAAT + ~100 m ground; a 50 m error is under one range bin at these ranges",
+ "erp_kw": 830,
+ "max_range_m": 60000.0,
+ "notch_hz": 15.0,
+ "illuminator": "ATSC 1.0 8-VSB; reference rebuilt from symbol decisions (vsb_ref.py)"
+}
