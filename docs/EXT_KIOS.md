@@ -77,3 +77,24 @@ recovers more than the signal has, so this file is at least 4 dB short of
 a transport stream. The antennas were aimed for radar, not reception. The
 chain is ready for a stronger recording: `--tps` for settings and MER,
 then `--qam 16 --rate 5/6 --out x.ts`, then `ffplay x.ts`.
+
+**gr-rxtune on the recording.** A recording has no gain left to turn, so
+`tools/rxtune_dvbt.py` gives gr-rxtune the software receiver's knobs
+through its `FunctionKnob` interface: which antenna (ch0, ch1, or both
+aligned and summed coherently), gr-dtv's acquisition SNR assumption, and
+where in the 70 s to listen (its hour-of-day axis, compressed). The dial
+is gr-dtv's MER with the cliff at EN 300 744's 13.5 dB for 16-QAM 5/6;
+proof of decode would have been a real transport stream. 62 cells:
+
+| path | MER, every setting and time | |
+|---|---|---|
+| ch0 (reference antenna) | 6.1-6.3 dB | flat: neither the acquisition setting nor the time moves it |
+| ch1 (surveillance antenna) | -2.7 to -1.0 dB | gr-dtv's channel estimate fails on this antenna |
+| both, summed | 5.0-5.5 dB | equal weights let ch1's echoes in; per-carrier MRC would at best recover ch0 |
+
+rxtune's verdict, unedited: `BELOW_CLIFF - MER 6.3 dB, 7.2 dB short of the
+cliff`, best cell `NOT recommended`, advice "try another antenna port,
+channel or time of day". It did what it promises: no knob is recommended
+without proof of decode, and the number it gives (7.2 dB short) is the
+same gap every other measurement found. The advice is right but cannot be
+taken on a file; the antenna was chosen in Cyprus in 2022.
