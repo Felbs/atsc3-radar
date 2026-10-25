@@ -48,6 +48,7 @@ import time
 from fractions import Fraction
 
 import numpy as np
+from scipy.signal import firwin
 from scipy.signal import resample_poly, fftconvolve, oaconvolve
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -65,6 +66,7 @@ PILOT = 1.25
 ALPHA = 0.1152
 DECIM3 = 3                                    # FS2 / 3 = 7.1748 MS/s
 FS3 = FS2 / DECIM3
+CHAN_FIR = firwin(255, 2.75e6 / (FS3 / 2)).astype(np.float32)   # channel filter at FS3
 
 
 # ------------------------------------------------------------------ pulses
@@ -106,7 +108,9 @@ def modulate(sym2, h=H_VSB):
 try:
     import numba
 
-    @numba.njit(parallel=True, fastmath=True, cache=True)
+    # cache=False: a cache entry written by a ProcessPool worker names module
+    # "__mp_main__" and cannot be reloaded from a plain run (selftest crashed)
+    @numba.njit(parallel=True, fastmath=True, cache=False)
     def _frac_interp_nb(xr, xi, tau, half, beta, i0b):
         n = tau.shape[0]
         outr = np.zeros(n, np.float32)
@@ -406,6 +410,11 @@ def build_block(x, fs, trellis=False):
     surv3 = resample_poly(zt * sh, 1, DECIM3).astype(np.complex64)
     rf3 = resample_poly(ref_full * sh, 1, DECIM3).astype(np.complex64)
     rb3 = resample_poly(ref_blank * sh, 1, DECIM3).astype(np.complex64)
+    # band-limit all three to the channel (+-2.69 MHz occupied). FS3 spans
+    # +-3.59 MHz, so the UPPER neighbour's pilot (3.31 MHz above our centre)
+    # was inside the surveillance and nothing in the reference could cancel
+    # it: RF35 7.0 -> 28.9 dB, RF34 15.3 -> 32.2, RF31 27.8 -> 30.5 (one block).
+    surv3, rf3, rb3 = (oaconvolve(v, CHAN_FIR, mode="same").astype(np.complex64) for v in (surv3, rf3, rb3))
     t_first = (start / ratio) / fs           # capture time (s) of output sample 0, block-relative
     diag = dict(pilot_hz=fp, pilot_db=pil_db, clock_ppm=ppm, n_sync=nseg, sync_rms_samples=rms,
                 sync_metric_db=mdb, field_sync_segments=int(fmask.sum() // SEG), t_first_s=t_first, **eq)
