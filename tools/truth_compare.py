@@ -38,7 +38,8 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-OBS_FIX = r"Z:\src\numpy-gps\lab_local\fix_result_joint.json"
+sys.path.insert(0, str(HERE))
+import radar_site                                              # noqa: E402
 
 # WNUV (RF25, Baltimore ATSC 3.0 lighthouse), Television Hill, Woodberry.
 # Public: FCC / Wikipedia infobox, fetched 2026-08-20. ERP 750 kW, HAAT 372.8 m.
@@ -100,8 +101,8 @@ def ecef(lat_deg, lon_deg, h_m):
 
 
 def observer():
-    d = json.load(open(OBS_FIX))["joint5"]
-    return float(d["lat"]), float(d["lon"]), float(d.get("alt_m", 0.0))
+    """Receiver position from lab/site.json (radar_site.py); never written anywhere."""
+    return radar_site.observer()
 
 
 def load_truth(path):

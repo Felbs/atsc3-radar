@@ -1,0 +1,11 @@
+{
+ "_comment": "copy to lab/site.json (gitignored) and fill in; see tools/radar_site.py",
+ "observer": {"lat": 0.0, "lon": 0.0, "alt_m": 0.0},
+ "sdr": {
+  "driver": "sdrplay",
+  "antennas": {"fm": "Antenna C", "tv": "Antenna B"}
+ },
+ "python": "",
+ "radio_lock_dir": "",
+ "stations_dirs": []
+}

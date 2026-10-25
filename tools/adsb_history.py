@@ -135,8 +135,8 @@ def truth(meta_paths, pad=300.0, kinds=("prod", "mlatonly")):
         meta_paths = [meta_paths]
     lat, lon, alt = tc.observer()
     blat, blon = 0.6, 0.75
-    box = (min(lat, tc.TX_LAT) - blat, max(lat, tc.TX_LAT) + blat,
-           min(lon, tc.TX_LON) - blon, max(lon, tc.TX_LON) + blon)
+    import radar_site
+    box = radar_site.truth_box(lat, lon, blat, blon)          # receiver and every known tower
     jobs = []
     for mp in meta_paths:
         meta = json.load(open(mp))

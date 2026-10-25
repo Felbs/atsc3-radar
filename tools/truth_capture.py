@@ -35,15 +35,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 LAB = HERE.parent / "lab"
 LAB.mkdir(exist_ok=True)
-sys.path.insert(0, r"Z:\src\gr-radiotuna\tools")
-import radio_lock                                             # noqa: E402
+sys.path.insert(0, str(HERE))
+import radar_site                                             # noqa: E402
+radio_lock = radar_site.radio_lock()                          # the fleet's lock, or a stub that always grants
 
 PY = sys.executable
 CAPTURE_TOOL = r"Z:\src\atsc3\tools\atsc3_capture.py"
 IQ_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iq_capture.py")
-OBS_FIX = r"Z:\src\numpy-gps\lab_local\fix_result_joint.json"
 OPENSKY = "https://opensky-network.org/api/states/all"
-TX_LAT, TX_LON = 39.336222, -76.649417   # WNUV, Television Hill (public)
 POLL_S = 10.0          # anonymous OpenSky resolution is 10 s; faster is waste
 BOX_LAT = 0.6          # +-deg, ~65 km
 BOX_LON = 0.75
@@ -54,10 +53,7 @@ def utc():
 
 
 def observer():
-    """(lat, lon, alt_m) from our own GPS fix. Not printed. Ever."""
-    d = json.load(open(OBS_FIX))
-    j = d["joint5"]
-    return float(j["lat"]), float(j["lon"]), float(j.get("alt_m", 0.0))
+    return radar_site.observer()
 
 
 class TruthPoller(threading.Thread):
@@ -138,10 +134,9 @@ def main():
     # An aircraft on approach to BWI, lit by 750 kW from 15 km, is a
     # strong far-range echo that a receiver-centred box never explains.
     # The box is the union of the fix's box and the (public) tower's.
-    box = (min(lat, TX_LAT) - BOX_LAT, max(lat, TX_LAT) + BOX_LAT,
-           min(lon, TX_LON) - BOX_LON, max(lon, TX_LON) + BOX_LON)
-    print(f"[truth] OpenSky box: fix +-{BOX_LAT}/{BOX_LON} deg union tower "
-          f"+-{BOX_LAT}/{BOX_LON} deg (fix coordinates withheld) -> {truth.name}")
+    box = radar_site.truth_box(lat, lon, BOX_LAT, BOX_LON)
+    print(f"[truth] OpenSky box: receiver and every station-file tower, each +-{BOX_LAT}/{BOX_LON} deg "
+          f"(receiver coordinates withheld) -> {truth.name}")
 
     poller = TruthPoller(box, truth)
     poller.start()

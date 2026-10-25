@@ -29,10 +29,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LAB = HERE.parent / "lab"
-# the capture needs SoapySDR: radioconda has it, the default python does not
-RADIOCONDA = r"C:\Users\emane\radioconda\python.exe"
-PY = RADIOCONDA if os.path.exists(RADIOCONDA) else sys.executable
+sys.path.insert(0, str(HERE))
+import radar_site                                             # noqa: E402
+# the capture needs SoapySDR; site.json "python" names an interpreter that has it
+PY = radar_site.python()
 IQ = str(HERE / "iq_capture.py")
+ANT_FM = radar_site.antenna("fm")
+ANT_TV = radar_site.antenna("tv")
 
 
 def tv_fc(rf):
@@ -44,19 +47,19 @@ def legs(a):
     L = []
     if a.only in (None, "fm"):
         for c in (92.0, 100.0, 105.0):
-            L.append(dict(kind="fm", tag=f"fm{c:.0f}", fc=c * 1e6, rate=8e6, ant="Antenna C",
+            L.append(dict(kind="fm", tag=f"fm{c:.0f}", fc=c * 1e6, rate=8e6, ant=ANT_FM,
                           rfgain=6, ifgr=45, secs=a.secs_fm))
     if a.only in (None, "vhf"):
         for rf in (7, 9, 12):
-            L.append(dict(kind="vsb", tag=f"rf{rf}", fc=tv_fc(rf), rate=8e6, ant="Antenna C",
+            L.append(dict(kind="vsb", tag=f"rf{rf}", fc=tv_fc(rf), rate=8e6, ant=ANT_FM,
                           rfgain=4, ifgr=40, secs=a.secs_tv, rf=rf))
     if a.only in (None, "uhf"):
         hot = {15, 31, 34, 35, 36}            # at/near full scale at rfgain 4 in the 00:22Z survey
         for rf in (15, 21, 22, 26, 27, 31, 34, 35, 36):
-            L.append(dict(kind="vsb", tag=f"rf{rf}", fc=tv_fc(rf), rate=8e6, ant="Antenna B",
+            L.append(dict(kind="vsb", tag=f"rf{rf}", fc=tv_fc(rf), rate=8e6, ant=ANT_TV,
                           rfgain=5 if rf in hot else 4, ifgr=32, secs=a.secs_tv, rf=rf))
     if a.only in (None, "atsc3"):
-        L.append(dict(kind="atsc3", tag="rf25", fc=tv_fc(25), rate=6.912e6, ant="Antenna B",
+        L.append(dict(kind="atsc3", tag="rf25", fc=tv_fc(25), rate=6.912e6, ant=ANT_TV,
                       rfgain=2, ifgr=32, secs=a.secs_tv, rf=25))
     if getattr(a, "rf", None):
         keep = {int(x) for x in a.rf.split(",")}
@@ -80,11 +83,12 @@ def main():
     for leg in legs(a):
         cap = sweep_dir / f"{leg['tag']}.cs16"
         cmd = [PY, IQ, "--fc", str(leg["fc"]), "--rate", str(leg["rate"]), "--secs", str(leg["secs"]),
-               "--ant", leg["ant"], "--rfgain", str(leg["rfgain"]), "--ifgr", str(leg["ifgr"]),
-               "--biast", "off", "--out", str(cap)]
+               "--rfgain", str(leg["rfgain"]), "--ifgr", str(leg["ifgr"]), "--biast", "off", "--out", str(cap)]
+        if leg["ant"]:
+            cmd += ["--ant", leg["ant"]]
         t_launch = time.time()
         print(f"[sweep] {datetime.now(timezone.utc):%H:%M:%S}Z {leg['tag']:6s} {leg['fc']/1e6:8.3f} MHz "
-              f"{leg['ant']} rfgain {leg['rfgain']} {leg['secs']:.0f} s", flush=True)
+              f"{leg['ant'] or 'default antenna'} rfgain {leg['rfgain']} {leg['secs']:.0f} s", flush=True)
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=leg["secs"] + 180)
         t_done = time.time()
         tail = [ln for ln in p.stdout.splitlines() if any(k in ln for k in ("headroom", "VERDICT", "lock", "VOID"))]
