@@ -48,7 +48,7 @@ import time
 from fractions import Fraction
 
 import numpy as np
-from scipy.signal import resample_poly, fftconvolve
+from scipy.signal import resample_poly, fftconvolve, oaconvolve
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pr_core as P                                            # noqa: E402
@@ -99,7 +99,7 @@ def modulate(sym2, h=H_VSB):
     """Symbols (one per symbol) -> complex baseband at FS2, pilot-at-DC domain."""
     up = np.zeros(2 * len(sym2), np.complex64)
     up[0::2] = sym2
-    return fftconvolve(up, h, mode="same").astype(np.complex64)
+    return oaconvolve(up, h, mode="same").astype(np.complex64)
 
 
 # --------------------------------------------------------------- resampling
@@ -194,7 +194,11 @@ def pilot_lock(z, fs2=FS2, search_hz=60e3, lp_s=1e-3):
     m = np.exp(-2j * np.pi * fp * np.arange(n) / fs2).astype(np.complex64)
     zz = z * m
     L = max(3, int(lp_s * fs2))
-    lp = fftconvolve(zz, np.ones(L, np.float32) / L, mode="same")
+    cs = np.concatenate([[0], np.cumsum(zz.astype(np.complex128))])
+    h2 = L // 2
+    lo = np.clip(np.arange(n) - h2, 0, n)
+    hi = np.clip(np.arange(n) + (L - h2), 0, n)
+    lp = ((cs[hi] - cs[lo]) / (hi - lo)).astype(np.complex64)
     pil_db = 10 * np.log10(np.mean(np.abs(lp) ** 2) / max(np.mean(np.abs(zz) ** 2), 1e-30))
     zz = zz * np.conj(lp) / np.maximum(np.abs(lp), 1e-12)
     return zz.astype(np.complex64), float(fp), float(pil_db)
@@ -207,7 +211,7 @@ def segment_sync_fit(zz, group=16):
     of `group` segments folded along the current clock estimate, then fitted
     by a line, iterated. Returns (p0, period_samples, n_groups,
     rms_residual_samples, metric_db)."""
-    y = np.real(fftconvolve(zz, np.conj(H_VSB[::-1]), mode="same"))
+    y = np.real(oaconvolve(zz, np.conj(H_VSB[::-1]), mode="same"))
     c = (y[:-6] - y[2:-4] - y[4:-2] + y[6:]) * 5
     P0 = 2 * SEG
     nseg = len(c) // P0 - 2
@@ -305,7 +309,7 @@ def equalize_and_slice(zt, m0, L=96, n_train=400_000, iters=2):
 
     def apply(w):
         wc = (w[:L] + 1j * w[L:2 * L]).astype(np.complex64)
-        full = fftconvolve(zt, wc[::-1], mode="full")
+        full = oaconvolve(zt, wc[::-1], mode="full")
         m = 2 * k
         return np.real(full[m - c + L - 1]) + w[-1]
 
@@ -512,8 +516,47 @@ def check(path, t0=1.0):
 
 
 # ---------------------------------------------------------------------- radar
+def _radar_block(job):
+    """One block: build the reference, then ECA + CAF + CFAR per dwell."""
+    (path, fs, t_blk, block, dwell_n, taps, max_range_km, doppler, n_doppler, pfa, notch, maps_dir) = job
+    x = load(path, fs, t_blk, block + 0.02)
+    if x is None:
+        return t_blk, None, [], [], "short read"
+    try:
+        surv, rf, rb, d = build_block(x, fs)
+    except Exception as e:                                     # a bad block is VOID, not fatal
+        return t_blk, None, [], [], f"{type(e).__name__}: {e}"
+    bin_m = C / FS3
+    dets, canc = [], []
+    start = 200
+    k = 0
+    while start + dwell_n <= len(surv) - 200 and (start + dwell_n) / FS3 + d["t_first_s"] <= block + 0.01:
+        s_ = surv[start:start + dwell_n]
+        clean = P.cancel_direct(s_, rf[start:start + dwell_n], taps)
+        canc.append(float(P.cancellation_db(s_, clean)))
+        rd, rax, dax = P.caf(rb[start:start + dwell_n], clean, FS3, max_range_km * 1e3, doppler, n_doppler)
+        q = P.detect(rd, rax, dax, pfa=pfa)
+        t_mid = t_blk + d["t_first_s"] + (start + dwell_n / 2) / FS3
+        for r in q:
+            if abs(r["doppler_hz"]) <= notch or r["range_m"] < 2 * bin_m:
+                continue
+            dets.append(dict(t_s=round(t_mid, 4), range_m=float(r["range_m"]), doppler_hz=float(r["doppler_hz"]),
+                             snr_db=float(r["snr_db"]), power=float(r["power"]), threshold=float(r["threshold"])))
+        if maps_dir:
+            noise, _ = P.cfar_threshold_map(rd, pfa=pfa)
+            np.save(os.path.join(maps_dir, f"rd_{t_mid:09.4f}.npy"),
+                    (10 * np.log10(rd + 1e-30) - 10 * np.log10(noise + 1e-30)).astype(np.float16))
+            if t_blk == 0.0 and k == 0 or not os.path.exists(os.path.join(maps_dir, "axes.npy")):
+                np.save(os.path.join(maps_dir, "axes.npy"), np.array([rax, None, dax], dtype=object), allow_pickle=True)
+        start += dwell_n
+        k += 1
+    d["t_block"] = t_blk
+    return t_blk, d, dets, canc, None
+
+
 def radar(argv):
     import argparse
+    from concurrent.futures import ProcessPoolExecutor
     ap = argparse.ArgumentParser()
     ap.add_argument("capture")
     ap.add_argument("--station", required=True)
@@ -521,18 +564,19 @@ def radar(argv):
     ap.add_argument("--secs", type=float, default=None)
     ap.add_argument("--block", type=float, default=1.0)
     ap.add_argument("--dwell-samples", type=int, default=1_180_000)
-    ap.add_argument("--taps", type=int, default=64)
+    ap.add_argument("--taps", type=int, default=160)   # 6.7 km: a 5.7 km static reflector leaked onto the 41.3 Hz field comb at 64
     ap.add_argument("--max-range-km", type=float, default=60.0)
     ap.add_argument("--doppler", type=float, default=1000.0)
     ap.add_argument("--n-doppler", type=int, default=512)
     ap.add_argument("--pfa", type=float, default=1e-6)
     ap.add_argument("--notch-hz", type=float, default=15.0)
+    ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--save-maps", action="store_true")
     ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
     side = json.load(open(os.path.splitext(a.capture)[0] + ".json"))
     fs = float(side["rate_hz"])
-    secs = a.secs or (os.path.getsize(a.capture) / 4 / fs - a.t0)
+    secs = a.secs or (os.path.getsize(a.capture) / 4 / fs - a.t0 - 0.05)
     out = a.out or os.path.join(os.path.dirname(a.capture), "tracks_V.json")
     maps_dir = None
     if a.save_maps:
@@ -540,65 +584,37 @@ def radar(argv):
         os.makedirs(maps_dir, exist_ok=True)
     bin_m = C / FS3
     lam = C / float(json.load(open(a.station))["fc_hz"])
-    print(f"[vsb ] {os.path.basename(a.capture)}  {secs:.0f} s in {a.block:.1f} s blocks; FS3 {FS3/1e6:.4f} MS/s "
-          f"(bin {bin_m:.1f} m), dwell {a.dwell_samples/FS3*1e3:.0f} ms, ECA {a.taps} taps")
-    dets, diags, canc = [], [], []
+    print(f"[vsb ] {os.path.basename(a.capture)}  {secs:.0f} s in {a.block:.1f} s blocks x {a.jobs} jobs; "
+          f"FS3 {FS3/1e6:.4f} MS/s (bin {bin_m:.1f} m), dwell {a.dwell_samples/FS3*1e3:.0f} ms, ECA {a.taps} taps", flush=True)
+    jobs = []
     t_blk = a.t0
-    nd = 0
-    tw = time.time()
     while t_blk + a.block <= a.t0 + secs + 1e-6:
-        x = load(a.capture, fs, t_blk, a.block + 0.02)
-        if x is None:
-            break
-        try:
-            surv, rf, rb, d = build_block(x, fs)
-        except Exception as e:
-            print(f"   block t={t_blk:6.2f}s VOID ({type(e).__name__}: {e})")
-            t_blk += a.block
-            continue
-        d["t_block"] = t_blk
-        diags.append(d)
-        start = 200
-        while start + a.dwell_samples <= len(surv) - 200 and \
-                (start + a.dwell_samples) / FS3 + d["t_first_s"] <= a.block + 0.01:
-            s = surv[start:start + a.dwell_samples]
-            clean = P.cancel_direct(s, rf[start:start + a.dwell_samples], a.taps)
-            canc.append(P.cancellation_db(s, clean))
-            rd, rax, dax = P.caf(rb[start:start + a.dwell_samples], clean, FS3, a.max_range_km * 1e3,
-                                 a.doppler, a.n_doppler)
-            q = P.detect(rd, rax, dax, pfa=a.pfa)
-            t_mid = t_blk + d["t_first_s"] + (start + a.dwell_samples / 2) / FS3
-            keep = []
-            for r in q:
-                if abs(r["doppler_hz"]) <= a.notch_hz or r["range_m"] < 2 * bin_m:
-                    continue
-                keep.append(dict(t_s=round(t_mid, 4), range_m=float(r["range_m"]), doppler_hz=float(r["doppler_hz"]),
-                                 snr_db=float(r["snr_db"]), power=float(r["power"]), threshold=float(r["threshold"])))
-            dets += keep
-            if maps_dir:
-                noise, _ = P.cfar_threshold_map(rd, pfa=a.pfa)
-                np.save(os.path.join(maps_dir, f"rd_{t_mid:09.4f}.npy"),
-                        (10 * np.log10(rd + 1e-30) - 10 * np.log10(noise + 1e-30)).astype(np.float16))
-                if nd == 0:
-                    np.save(os.path.join(maps_dir, "axes.npy"), np.array([rax, None, dax], dtype=object), allow_pickle=True)
-            nd += 1
-            start += a.dwell_samples
-        best = max([k for k in dets if abs(k["t_s"] - t_blk - 0.5) < 0.6], key=lambda k: k["snr_db"], default=None)
-        print(f"   block t={t_blk:6.2f}s clock {d['clock_ppm']:+6.2f} ppm eqSNR {d['eq_snr_db']:5.1f} dB "
-              f"SER~{d['ser_est']:.0e} canc {np.median(canc[-6:]):5.1f} dB  dets {len(dets):4d}"
-              + (f"  best {best['snr_db']:4.1f} dB @ {best['range_m']/1e3:6.2f} km {best['doppler_hz']:+6.0f} Hz" if best else ""),
-              flush=True)
+        jobs.append((a.capture, fs, round(t_blk, 6), a.block, a.dwell_samples, a.taps, a.max_range_km,
+                     a.doppler, a.n_doppler, a.pfa, a.notch_hz, maps_dir))
         t_blk += a.block
+    dets, diags, canc = [], [], []
+    tw = time.time()
+    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
+        for t_b, d, dd, cc, err in ex.map(_radar_block, jobs):
+            if d is None:
+                print(f"   block t={t_b:6.2f}s VOID ({err})", flush=True)
+                continue
+            diags.append(d); dets += dd; canc += cc
+            best = max(dd, key=lambda k: k["snr_db"], default=None)
+            print(f"   block t={t_b:6.2f}s clock {d['clock_ppm']:+6.2f} ppm eqSNR {d['eq_snr_db']:5.1f} dB "
+                  f"SER~{d['ser_est']:.0e} canc {np.median(cc) if cc else 0:5.1f} dB  dets {len(dd):3d}"
+                  + (f"  best {best['snr_db']:4.1f} dB @ {best['range_m']/1e3:6.2f} km {best['doppler_hz']:+6.0f} Hz" if best else ""),
+                  flush=True)
     import fm_radar as F
     tracks = F.link_tracks(dets, bin_m, lam, max_dr_bins=4, max_df=20.0, min_n=3)
-    print(f"[vsb ] {nd} dwells in {time.time()-tw:.0f} s; cancellation median {np.median(canc):.1f} dB; "
-          f"{len(dets)} detections -> {len(tracks)} tracks")
+    print(f"[vsb ] {len(canc)} dwells from {len(diags)} blocks in {time.time()-tw:.0f} s; cancellation median "
+          f"{np.median(canc):.1f} dB; {len(dets)} detections -> {len(tracks)} tracks")
     for i, tr in enumerate(tracks[:12]):
         print(f"  track {i}: {tr['n']} dwells, {tr['span_s']:.1f}s, {tr['range0_m']/1e3:.2f}->{tr['range1_m']/1e3:.2f} km, "
               f"fd {tr['doppler_mean_hz']:+.1f} Hz | observed {tr['observed_rate_ms']:+.1f} vs predicted "
               f"{tr['predicted_rate_ms']:+.1f} m/s, max {max(tr['snr_db']):.1f} dB")
     json.dump(dict(capture=os.path.abspath(a.capture), fs_hz=FS3, illuminator="ATSC 1.0 8-VSB, decision-rebuilt reference",
-                   taps=a.taps, cancellation_db=[float(c) for c in canc], blocks=diags,
+                   taps=a.taps, cancellation_db=canc, blocks=diags,
                    n_detections=len(dets), tracks=tracks, detections=dets), open(out, "w"), indent=1)
     print(f"-> {out}")
 
