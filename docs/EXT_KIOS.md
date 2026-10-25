@@ -98,3 +98,81 @@ channel or time of day". It did what it promises: no knob is recommended
 without proof of decode, and the number it gives (7.2 dB short) is the
 same gap every other measurement found. The advice is right but cannot be
 taken on a file; the antenna was chosen in Cyprus in 2022.
+
+## One antenna, no decode: a DVB-T reference from the pilots
+
+The recording's second antenna made the tracks above easy. This repo's
+real claim is that one receiver is enough, so the same file was run again
+with **channel 1 alone**: `tools/dvbt_pilot_ref.py` synthesizes what the
+transmitter put on its pilot carriers -- values fixed by the standard,
+known without decoding anything -- and that waveform is the reference for
+the same channel. The TV picture needed 13.5 dB; the pilots need no
+decode at all.
+
+Getting the reference right took four corrections, each found by a
+check before the radar ran:
+
+1. **Pilot values.** The scattered-pilot pattern and the PRBS sign are
+   tested against the received symbols: pilots 12 carriers apart see
+   nearly the same channel, so the right values make neighbours agree.
+   Right: 0.92 (ch0), 0.74 (ch1); every wrong combination 0.02-0.05.
+2. **One whole carrier of frequency offset.** The cyclic prefix gives the
+   carrier offset only modulo one carrier spacing (1116 Hz). Sliding the
+   continual pilots found the rest: -1 carrier, -926 Hz in all (pilot
+   coherence 0.08 -> 0.92). This, not the pilot code, is what broke the
+   hand-written equalizer earlier.
+3. **Sample-clock drift.** The B210 and the transmitter differ by about
+   1.7 ppm, ~180 samples over 20 s. A timing search around one fixed
+   offset lost the symbols halfway, and the reference slid against the
+   channel at ~9 samples/s: every peak walked +295 m/s at 0 Hz. Timing
+   is now fitted block by block, then each symbol is searched around its
+   predicted place.
+4. **Which peak is the direct path.** A range-Doppler map only sees
+   positive range. It latched onto a path 125 samples (4.1 km) behind the
+   real direct path, which the cyclic-prefix timing had put at -24
+   samples. A two-sided cross-correlation finds the direct path 37 dB
+   clear; it is moved to zero lag and zero Doppler. The 4.1 km path,
+   nearly as strong, is most likely another transmitter of Cyprus's
+   single-frequency network, and the reason gr-dtv's equalizer fails on
+   this antenna.
+
+Cancellation is then 0.1-0.4 dB, and that is the expected number: the
+canceller can only remove what the reference holds, the pilots, about
+15 % of the power. The data carriers stay in the channel.
+
+**What it costs, measured on the drone itself**, its own cell, same
+window, same channel, the two references swapped:
+
+| time | recorded reference (ch0) | pilot-only (ch1 alone) |
+|---|---|---|
+| 14 s | 25.8 dB | 6.3 dB, wrong cell |
+| 16 s | 17.0 dB | 11.1 dB, at -64 Hz |
+| 18 s | 17.4 dB | 6.0 dB |
+
+6-20 dB weaker, more than the 7.5 dB the pilots' share of power alone
+predicts. At 0.5 s dwells and a 1e-6 false-alarm rate: 1 detection in
+20 s. At 1 s dwells (+3 dB; the drone crosses about one 33 m cell per
+second) and 1e-5:
+
+| | two antennas, recorded reference | one antenna, pilot-only |
+|---|---|---|
+| outbound pass | 13.2-19.8 s, 262 -> 487 m, -62.0 Hz | 17.0-19.5 s, 295 -> 393 m, -63.8 Hz |
+| inbound pass | 50.8-56.8 s, 675 -> 450 m, +73.3 Hz | 50.5-56.5 s, 623 -> 393 m, +73.3 Hz |
+| wavelength from walk / Doppler | 0.584, 0.563 m | 0.61, 0.49 m |
+| short passes (0.2-2.2 s, 67.8-69.2 s) | found | not found |
+
+Both long passes come back from one antenna, in the right place, moving
+the right way, the inbound one at the same Doppler to 0.1 Hz. The two
+short ones are lost. Ranges differ by a cell or two because each version
+measures from its own direct path.
+
+**Unexplained.** The pilot-only runs, and only they, show a cell near
+1574 m at +32-34 Hz in three separate windows (3.5-9.5, 13-14.5 and
+66-68 s) that does not move in range: a real target at +33 Hz would walk
+four cells in six seconds. It is not one of the reference's own
+ambiguities (those sit at 22.4 km and 223 Hz). Not claimed as anything.
+
+So the single-receiver method works on DVB-T too, checked against an
+independent reference on the same data -- at a price: on this weak
+recording the pilots alone give up the short passes and need twice the
+dwell.
