@@ -162,6 +162,12 @@ def main():
     side = json.load(open(side_p)) if os.path.exists(side_p) else {}
     fs_in = a.fs_in or float(side.get("rate_hz", 2e6))
     fc = float(st.get("fc_hz") or side.get("centre_hz"))
+    # the station need not be at the capture centre: a wide capture holds
+    # many FM channels, and each is mixed to DC before decimation
+    fc_cap = float(side.get("centre_hz", fc))
+    offset = fc - fc_cap
+    if abs(offset) > 0.45 * fs_in:
+        raise SystemExit(f"station {fc/1e6:.3f} MHz is outside the capture ({fc_cap/1e6:.3f} +- {fs_in/2e6:.1f} MHz)")
     fs = fs_in / a.decim
     lam = C / fc
     bin_m = C / fs
@@ -173,7 +179,7 @@ def main():
         maps_dir = os.path.join(os.path.dirname(out), "maps", os.path.splitext(os.path.basename(out))[0])
         os.makedirs(maps_dir, exist_ok=True)
 
-    print(f"[fm  ] {os.path.basename(a.capture)}  fc {fc/1e6:.3f} MHz  fs {fs_in/1e6:.3f} -> {fs/1e3:.0f} kS/s  "
+    print(f"[fm  ] {os.path.basename(a.capture)}  fc {fc/1e6:.3f} MHz (offset {offset/1e3:+.0f} kHz)  fs {fs_in/1e6:.3f} -> {fs/1e3:.0f} kS/s  "
           f"bin {bin_m:.0f} m  lambda {lam:.2f} m  dwell {a.dwell} s hop {a.hop} s  ref={a.ref} taps={a.taps}")
     print(f"[fm  ] map: {a.max_range_km:.0f} km x +-{a.doppler:.0f} Hz, {a.n_doppler} Doppler bins "
           f"({2*a.doppler/a.n_doppler:.2f} Hz each); notch +-{a.notch_hz} Hz; "
@@ -187,6 +193,9 @@ def main():
         x = load_block(a.capture, fs_in, t, a.dwell)
         if x is None:
             break
+        if offset:
+            n0 = int(t * fs_in)
+            x = x * np.exp(-2j * np.pi * offset * (np.arange(len(x)) + n0) / fs_in).astype(np.complex64)
         x = decimate(x, a.decim)
         x -= x.mean()
         ref = reconstruct(x, fs) if a.ref == "recon" else x.copy()

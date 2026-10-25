@@ -167,7 +167,7 @@ def main():
     trk = json.load(open(sys.argv[2]))
     truth_path = meta["truth"]
     if not os.path.exists(truth_path):
-        # absolute paths in meta predate the passiveTuna -> atsc3-radar rename
+        # absolute paths in meta predate the passiveTuna -> atsc3-radar -> broadcast-radar renames
         truth_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])),
                                   os.path.basename(truth_path))
     truth = load_truth(truth_path)

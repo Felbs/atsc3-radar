@@ -156,7 +156,7 @@ def main():
     axr.set_xlim(0, meta["secs"] + 30)
     plt.setp(axr.get_xticklabels(), visible=False)
 
-    fig.suptitle(f"atsc3-radar truth run {Path(args[0]).stem.split('_')[-1].replace('.meta', '')}  "
+    fig.suptitle(f"broadcast-radar truth run {Path(args[0]).stem.split('_')[-1].replace('.meta', '')}  "
                  f"{tc.STATION_NAME}  {meta['ant']}  rfgain {meta['rfgain']}  bias-T {meta['biast']}",
                  fontsize=13, color=INK, x=0.055, ha="left")
     fig.savefig(out, facecolor="white")

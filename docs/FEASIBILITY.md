@@ -1,4 +1,4 @@
-# atsc3-radar — feasibility, from our own numbers
+# broadcast-radar (then atsc3-radar) — feasibility, from our own numbers
 
 **2026-08-20.** Bistatic passive radar using local ATSC 3.0 transmitters as
 illuminators of opportunity, an RSPdx as the receiver, and aeroTuna's ADS-B

@@ -1,0 +1,18 @@
+{
+ "name": "WWWT-FM 107.7 MANASSAS, VA (FCC public record)",
+ "short_name": "107.7 FM / WWWT-FM",
+ "fc_hz": 107700000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.74177777777778,
+ "tx_lon": -77.83525,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 29.0,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 28.9,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}

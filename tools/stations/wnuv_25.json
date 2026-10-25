@@ -1,0 +1,13 @@
+{
+ "name": "WNUV RF25 Baltimore MD ATSC 3.0 (FCC)",
+ "short_name": "RF25 / WNUV (ATSC 3.0)",
+ "fc_hz": 539000000.0,
+ "fs_hz": 6912000.0,
+ "tx_lat": 39.336222,
+ "tx_lon": -76.649417,
+ "tx_alt_m": 400.0,
+ "erp_kw": 750,
+ "max_range_m": 60000.0,
+ "notch_hz": 15.0,
+ "illuminator": "ATSC 3.0 OFDM; pilot-synthesized reference (track_hunt.py)"
+}

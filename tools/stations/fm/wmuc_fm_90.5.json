@@ -1,0 +1,18 @@
+{
+ "name": "WMUC-FM 90.5 COLLEGE PARK, MD (FCC public record)",
+ "short_name": "90.5 FM / WMUC-FM",
+ "fc_hz": 90500000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.98305555555556,
+ "tx_lon": -76.94333333333334,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 0.03,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 16.7,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked; AMBIGUOUS with WPER (74 km)",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}

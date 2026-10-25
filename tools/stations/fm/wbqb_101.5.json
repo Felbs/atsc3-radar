@@ -1,0 +1,18 @@
+{
+ "name": "WBQB 101.5 FREDERICKSBURG, VA (FCC public record)",
+ "short_name": "101.5 FM / WBQB",
+ "fc_hz": 101500000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.332638888888894,
+ "tx_lon": -77.39441666666667,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 50.0,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 40.5,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}

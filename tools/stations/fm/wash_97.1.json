@@ -1,0 +1,18 @@
+{
+ "name": "WASH 97.1 WASHINGTON, DC (FCC public record)",
+ "short_name": "97.1 FM / WASH",
+ "fc_hz": 97100000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.950388888888895,
+ "tx_lon": -77.07941666666666,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 17.5,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 38.8,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}

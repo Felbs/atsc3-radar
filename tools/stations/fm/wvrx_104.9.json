@@ -1,0 +1,18 @@
+{
+ "name": "WVRX 104.9 STRASBURG, VA (FCC public record)",
+ "short_name": "104.9 FM / WVRX",
+ "fc_hz": 104900000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 39.01844444444444,
+ "tx_lon": -78.42611111111111,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 4.1,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 19.4,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked; AMBIGUOUS with WIGO-FM (129 km)",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}

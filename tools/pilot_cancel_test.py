@@ -6,7 +6,7 @@ THE EXPERIMENT, IN ONE SENTENCE
 Build the ATSC 3.0 pilot lattice from A/322 tables alone (`pr_pilots.py`),
 align it to a banked RF25 capture on the capture's own raw clock, subtract
 it, and ask what happened to the 7.40 km / +198.5 Hz comb that dominates
-every range-Doppler map atsc3-radar has ever made.
+every range-Doppler map broadcast-radar has ever made.
 
 Why this is the entry ticket and not a nice-to-have: FIRST_LOOK.md proved
 the comb is signal-borne (absent from the antenna-disconnected VOID

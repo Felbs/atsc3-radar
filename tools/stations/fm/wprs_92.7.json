@@ -1,0 +1,18 @@
+{
+ "name": "WPRS 92.7 PRINCE FREDERICK, MD (FCC public record)",
+ "short_name": "92.7 FM / WPRS",
+ "fc_hz": 92700000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.64980555555555,
+ "tx_lon": -76.77341666666666,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 2.15,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 26.5,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}

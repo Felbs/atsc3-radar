@@ -1,11 +1,20 @@
-# atsc3-radar
+# broadcast-radar
 
-**Receive-only. The TV towers do the transmitting.**
+**Receive-only. The broadcasters do the transmitting.**
 
-Passive bistatic radar for a single SDR: a local ATSC 3.0 broadcast tower
-floods the sky; aircraft reflect it; an RSPdx and a synthesized copy of the
-tower's own waveform turn those echoes into range and Doppler. No transmitter,
-no licence, one receiver.
+Passive bistatic radar from one SDR: a broadcast tower floods the sky,
+aircraft reflect it, and an RSPdx turns those echoes into range and Doppler
+with no second channel, because the reference is rebuilt from the broadcast
+itself. Three illuminators so far, same receiver, same code, same ADS-B truth:
+
+| illuminator | reference | range cell | Doppler cell | what it is good at |
+|---|---|---|---|---|
+| **ATSC 3.0** (OFDM, 6 MHz) | synthesized pilot lattice | 43 m | ~6 Hz | *where*: tens of metres |
+| **ATSC 1.0** (8-VSB, 5.4 MHz) | symbols decided, re-modulated | 42 m | ~6 Hz | *where*, more towers, VHF too |
+| **FM** (analog, 200 kHz) | discriminated and re-modulated | 1.2 km | 0.6 Hz | *how far and how fast*: 97 km, 1 Hz |
+
+No transmitter, no licence, one receiver. Everything a claim rests on
+ships with its control, and the observer position is never written here.
 
 Status (2026-10-24, night): the confirming run, the gain-pair control, a
 first pass at non-ADS-B targets, and an FM comparison all happened in one
@@ -16,6 +25,13 @@ tracked for 116 s from 26 to 44 km, matches at 77, 79 and 97 km, 1 Hz
 Doppler error, detection-grade under the strictest rule. FM sees farther
 and reads speed; ATSC 3.0 sees where. See `docs/TRUTH_RUN_1024.md`,
 `docs/GAIN_PAIR_1024.md`, `docs/UNMATCHED_1024.md`, `docs/FM_VS_ATSC3_1024.md`.
+
+ATSC 1.0 joined on 2026-10-25: WETA RF31 locked on every block of its
+first capture (equalized SNR 29.7 dB, zero sync errors) and its tracks
+walk at the rate their own Doppler predicts to 1-3 %; the ADS-B check
+waits on the day's adsb.lol history. A sweep of every broadcast channel
+the RSPdx can reach (three FM spans, VHF and UHF TV, WNUV) is in
+`tools/sweep_capture.py` / `tools/sweep_run.py`.
 
 The goal that counts: aircraft that are *not* on ADS-B.
 

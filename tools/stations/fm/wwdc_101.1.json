@@ -1,0 +1,18 @@
+{
+ "name": "WWDC 101.1 WASHINGTON, DC (FCC public record)",
+ "short_name": "101.1 FM / WWDC",
+ "fc_hz": 101100000.0,
+ "fs_hz": 250000.0,
+ "tx_lat": 38.999833333333335,
+ "tx_lon": -77.05719444444445,
+ "tx_alt_m": 200.0,
+ "tx_alt_note": "ESTIMATE: ground + tower; under one range bin",
+ "erp_kw": 22.5,
+ "max_range_m": 120000.0,
+ "r_gate_m": 2200.0,
+ "f_gate_hz": 8.0,
+ "notch_hz": 5.0,
+ "survey_power_db": 35.0,
+ "identity": "nearest FCC licensee to the receiver on this frequency; RDS not checked",
+ "illuminator": "FM broadcast, analog, 200 kHz; reference = reconstructed"
+}
