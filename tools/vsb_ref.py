@@ -421,6 +421,53 @@ def build_block(x, fs, trellis=False):
     return surv3, rf3, rb3, diag
 
 
+# ------------------------------------------------------------ field comb
+FIELD_HZ = RS / (SEG * FIELD)                    # 41.32 Hz
+
+
+def comb_flags(dets, bin_m, tol_hz=4.5, min_n=3, min_dwells=5):
+    """Detections that are the 8-VSB FIELD COMB, not targets.
+
+    RF7 (10-25 sweep) put a ladder of detections at 0.96 / 1.92 / 2.80 /
+    5.68 km for 20 s, at Dopplers +-1, 3, 4 x 41.3 Hz (the field rate), in
+    mirror pairs. Not static clutter (a second ECA pass on the CAF reference
+    removes 0.01 dB), not slow clutter (Doppler-shifted ECA taps: no
+    change), no second pilot visible. Whatever drives it, its signature is
+    one no set of aircraft produces: one range cell, one dwell, >= 3
+    detections on one f0 + k x 41.3 Hz comb with >= 2 distinct k.
+    Pass 2: a cell that shows the comb in >= min_dwells dwells has every
+    detection on its k != 0 comb lines flagged. On RF21/31/34/35/36 this
+    flags 0-3 detections and no point of any >= 50-dwell track."""
+    flag = np.zeros(len(dets), bool)
+    by = {}
+    for i, d in enumerate(dets):
+        by.setdefault(d["t_s"], []).append(i)
+    for ii in by.values():
+        if len(ii) < min_n:
+            continue
+        r = np.array([dets[i]["range_m"] for i in ii]) / bin_m
+        f = np.array([dets[i]["doppler_hz"] for i in ii])
+        for a_ in range(len(ii)):
+            same = np.abs(r - r[a_]) <= 1.01
+            if same.sum() < min_n:
+                continue
+            dk = (f[same] - f[a_]) / FIELD_HZ
+            on = np.abs(dk - np.round(dk)) * FIELD_HZ < tol_hz
+            if on.sum() >= min_n and len(set(np.round(dk[on]).astype(int))) >= 2:
+                flag[np.array(ii)[same][on]] = True
+    cells = {}
+    for i in np.where(flag)[0]:
+        cells.setdefault(int(round(dets[i]["range_m"] / bin_m)), set()).add(dets[i]["t_s"])
+    hot = [c for c, ts in cells.items() if len(ts) >= min_dwells]
+    for i, d in enumerate(dets):
+        c = int(round(d["range_m"] / bin_m))
+        if any(abs(c - h) <= 1 for h in hot):
+            k = d["doppler_hz"] / FIELD_HZ
+            if round(k) != 0 and abs(k - round(k)) * FIELD_HZ < tol_hz:
+                flag[i] = True
+    return flag, sorted(h * bin_m for h in hot)
+
+
 # ----------------------------------------------------------------- selftest
 def synth(seconds=1.0, fs=8e6, ppm=15.0, cfo=3100.0, seed=1):
     rng = np.random.default_rng(seed)
@@ -640,16 +687,21 @@ def radar(argv):
                   + (f"  best {best['snr_db']:4.1f} dB @ {best['range_m']/1e3:6.2f} km {best['doppler_hz']:+6.0f} Hz" if best else ""),
                   flush=True)
     import fm_radar as F
-    tracks = F.link_tracks(dets, bin_m, lam, max_dr_bins=4, max_df=20.0, min_n=3)
+    cf, hot = comb_flags(dets, bin_m)
+    for d_, f_ in zip(dets, cf):
+        d_["comb"] = bool(f_)
+    tracks = F.link_tracks([d_ for d_ in dets if not d_["comb"]], bin_m, lam, max_dr_bins=4, max_df=20.0, min_n=3)
     print(f"[vsb ] {len(canc)} dwells from {len(diags)} blocks in {time.time()-tw:.0f} s; cancellation median "
-          f"{np.median(canc):.1f} dB; {len(dets)} detections -> {len(tracks)} tracks")
+          f"{np.median(canc):.1f} dB; {len(dets)} detections, {int(cf.sum())} field-comb flagged"
+          + (f" (cells at {', '.join(f'{h/1e3:.2f}' for h in hot)} km)" if hot else "") + f" -> {len(tracks)} tracks")
     for i, tr in enumerate(tracks[:12]):
         print(f"  track {i}: {tr['n']} dwells, {tr['span_s']:.1f}s, {tr['range0_m']/1e3:.2f}->{tr['range1_m']/1e3:.2f} km, "
               f"fd {tr['doppler_mean_hz']:+.1f} Hz | observed {tr['observed_rate_ms']:+.1f} vs predicted "
               f"{tr['predicted_rate_ms']:+.1f} m/s, max {max(tr['snr_db']):.1f} dB")
     json.dump(dict(capture=os.path.abspath(a.capture), fs_hz=FS3, illuminator="ATSC 1.0 8-VSB, decision-rebuilt reference",
                    taps=a.taps, cancellation_db=canc, blocks=diags,
-                   n_detections=len(dets), tracks=tracks, detections=dets), open(out, "w"), indent=1)
+                   n_detections=len(dets), n_comb_flagged=int(cf.sum()), comb_cells_m=hot,
+                   tracks=tracks, detections=dets), open(out, "w"), indent=1)
     print(f"-> {out}")
 
 

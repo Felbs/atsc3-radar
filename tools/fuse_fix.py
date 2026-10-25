@@ -1,32 +1,34 @@
-"""fuse_fix.py -- multistatic position fix by fusing range-Doppler maps BEFORE detection.
+"""fuse_fix.py -- multistatic position fix by fusing range-Doppler maps BEFORE detection,
+with Doppler inside the score.
 
-fix_position.py intersects detections: every station must pass its own CFAR
-threshold on the same dwell, and a weak station (one that cancels 22 dB
-instead of 31) throws most aircraft away. Here nothing is thresholded per
-station. For every point P of a 3-D grid around the receiver the bistatic
-range to each illuminator is fixed geometry, so each station contributes the
-strongest SNR it has at that range (over all Doppler outside the notch);
-the per-station profiles are robustly normalised, summed over stations and
-over W consecutive dwells (an aircraft moves < 1 km in 3 s), and the grid is
-searched for peaks.
+Version 1 (commit c709c56) scored a grid point by each station's best SNR at
+its bistatic range over ANY Doppler. That searches ~1e6 range-cell triples,
+so its noise maximum was as high as an aircraft (real 165.7 vs null 162.5).
 
-Verification, in order:
-  1. Null: the same search with ONE station's maps shifted by 60 s (120
-     dwells, circular), for each station in turn. Shifting by one dwell is
-     not a null -- an aircraft moves 100 m in 0.5 s, inside one 1.2 km cell.
-     The detection threshold is the highest peak score any null produces,
-     so the nulls give zero detections by construction and the real count
-     above it is the result.
-  2. Doppler: at a peak, the three Doppler profiles at the three ranges
-     must be explained by ONE horizontal velocity (residual < F_TOL Hz).
-     Range only enters the score, so this is an independent check.
-  3. Persistence: peaks linked over windows into tracks that move at an
-     aircraft speed.
+Version 2. For a grid point P (east, north, altitude) and a horizontal
+velocity v, station i sees bistatic range r_i(P) and Doppler
+    f_i = a_i(P) . v,     a_i = -(u_T,i + u_R)_horizontal / lambda_i
+(u = unit vectors from tower and receiver to P; +Hz = closing). Two stations'
+Doppler peaks at their ranges fix v (2 equations, 2 unknowns); v then
+PREDICTS the third station's Doppler to within one 0.59 Hz cell. Score =
+the WEAKEST station's value at its cell (min over stations, declared
+before running -- a fix needs all three): noise rarely puts peaks on two
+maps whose implied velocity lands a third peak exactly where predicted.
+Every pairing (A,B->C), (A,C->B), (B,C->A) over each station's top K Doppler
+peaks at its range is tried; the best is kept per point.
 
-Positions go to the json (lab/, gitignored); stdout prints counts and
-errors only.
+Maps are summed over W dwells (3 s at 0.5 s hop: an aircraft moves < 1 km,
+under one 1.2 km cell), in linear SNR, with the first MIN_BIN range bins and
+each bin's capture median removed (static clutter).
 
-Usage: python tools/fuse_fix.py <tracks_A.json> <tracks_B.json> <tracks_C.json> [--window 6]
+Nulls: the same search with ONE station's maps shifted by 60 s (circular),
+for each station. Threshold = highest null peak; real peaks above it are
+the result. Then persistence: peaks linked across windows when the second
+position is where the first one's velocity says it should be.
+
+Positions go to the json (lab/, gitignored); stdout prints counts only.
+
+Usage: python tools/fuse_fix.py <tracks_A.json> <tracks_B.json> <tracks_C.json> [--window 6] [--k 4]
        (tracks files from fm_radar.py --save-maps on the same capture)
 """
 import argparse
@@ -34,19 +36,21 @@ import glob
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
+import numba
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import truth_compare as tc                                     # noqa: E402
-from fix_position import doppler_velocity, ecef_to_lla         # noqa: E402
+from fix_position import ecef_to_lla                           # noqa: E402
 
 C = 2.998e8
 NULL_SHIFT_S = 60.0
-F_TOL = 3.0          # Hz; Doppler cells are 0.59 Hz
 NOTCH = 5.0
-MIN_BIN = 3       # first 3.6 km of bistatic range excluded, as the single-station detector does
+MIN_BIN = 3
+V_MIN, V_MAX = 40.0, 320.0
 
 
 def load_station(path):
@@ -56,39 +60,90 @@ def load_station(path):
     rax, _, dax = np.load(maps_dir / "axes.npy", allow_pickle=True)
     files = sorted(glob.glob(str(maps_dir / "rd_*.npy")))
     t = np.array([float(Path(f).stem[3:]) for f in files])
-    maps = np.stack([np.load(f).astype(np.float32) for f in files])   # (n_t, n_r, n_d) dB over CFAR noise
-    keep = np.abs(np.asarray(dax, float)) > NOTCH
-    prof = maps[:, :, keep].max(axis=2)                                # (n_t, n_r) best SNR at each range
-    # robust per-dwell normalisation so a strong station does not dominate
-    med = np.median(prof, axis=1, keepdims=True)
-    mad = np.median(np.abs(prof - med), axis=1, keepdims=True) * 1.4826 + 1e-6
-    z = (prof - med) / mad
-    # remove what never changes: residual direct path / static clutter sits in the
-    # first range bins in every dwell and, summed over three stations, outscored
-    # every aircraft (and every null) at grid points near the receiver
-    z = z - np.median(z, axis=0, keepdims=True)
-    z[:, :MIN_BIN] = -10.0
-    return dict(name=st.get("short_name", Path(path).stem), T=tc.ecef(st["tx_lat"], st["tx_lon"], st.get("tx_alt_m", 200.0)),
-                lam=C / d["fc_hz"], rax=np.asarray(rax, float), dax=np.asarray(dax, float), t=t, maps=maps, z=z)
+    db = np.stack([np.load(f).astype(np.float32) for f in files])      # (n_t, n_r, n_d) dB over CFAR noise
+    lin = 10 ** (np.clip(db, -20, 40) / 10)
+    lin -= np.median(lin, axis=0, keepdims=True)                        # what never changes
+    lin[:, :MIN_BIN, :] = 0
+    dax = np.asarray(dax, float)
+    lin[:, :, np.abs(dax) <= NOTCH] = 0
+    return dict(name=st.get("short_name", Path(path).stem),
+                T=tc.ecef(st["tx_lat"], st["tx_lon"], st.get("tx_alt_m", 200.0)),
+                lam=C / d["fc_hz"], rax=np.asarray(rax, float), dax=dax, t=t, lin=lin)
+
+
+@numba.njit(parallel=True, cache=False)
+def score_grid(M, pk, rb, A, f0, df, K):
+    """M: (3, n_r, n_d) window maps; pk: (3, n_r, K) top Doppler bins per range;
+    rb: (nP, 3) range bin (-1 invalid); A: (nP, 3, 2) Doppler-per-velocity.
+    Returns best score, its velocity, per point."""
+    nP = rb.shape[0]
+    n_d = M.shape[2]
+    best = np.zeros(nP, np.float32)
+    bv = np.zeros((nP, 2), np.float32)
+    for p in numba.prange(nP):
+        ok = True
+        for i in range(3):
+            if rb[p, i] < 0:
+                ok = False
+        if not ok:
+            continue
+        for c in range(3):               # c = predicted station
+            a_ = (c + 1) % 3
+            b_ = (c + 2) % 3
+            ra = rb[p, a_]; rbb = rb[p, b_]; rc = rb[p, c]
+            det = A[p, a_, 0] * A[p, b_, 1] - A[p, a_, 1] * A[p, b_, 0]
+            if abs(det) < 1e-6:
+                continue
+            for ka in range(K):
+                ia = pk[a_, ra, ka]
+                fa = f0 + ia * df
+                va_ = M[a_, ra, ia]
+                if va_ <= best[p]:
+                    continue
+                for kb in range(K):
+                    ib = pk[b_, rbb, kb]
+                    fb = f0 + ib * df
+                    vb_ = M[b_, rbb, ib]
+                    if vb_ <= best[p]:
+                        continue
+                    vx = (fa * A[p, b_, 1] - fb * A[p, a_, 1]) / det
+                    vy = (A[p, a_, 0] * fb - A[p, b_, 0] * fa) / det
+                    sp = np.sqrt(vx * vx + vy * vy)
+                    if sp < 40.0 or sp > 320.0:
+                        continue
+                    fc = A[p, c, 0] * vx + A[p, c, 1] * vy
+                    ic = int(round((fc - f0) / df))
+                    if ic < 1 or ic > n_d - 2:
+                        continue
+                    vc = max(M[c, rc, ic - 1], max(M[c, rc, ic], M[c, rc, ic + 1]))
+                    s = min(va_, min(vb_, vc))
+                    if s > best[p]:
+                        best[p] = s
+                        bv[p, 0] = vx
+                        bv[p, 1] = vy
+    return best, bv
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("tracks", nargs="+")
-    ap.add_argument("--window", type=int, default=6, help="dwells summed per score (hop 0.5 s)")
+    ap.add_argument("tracks", nargs=3)
+    ap.add_argument("--window", type=int, default=6)
+    ap.add_argument("--k", type=int, default=4, help="Doppler peaks per station per range bin")
     ap.add_argument("--extent-km", type=float, default=100.0)
     ap.add_argument("--step-km", type=float, default=1.0)
     ap.add_argument("--alts", default="1000,2500,4000,6000,8500,11000")
-    ap.add_argument("--peaks", type=int, default=8, help="peaks examined per window")
+    ap.add_argument("--peaks", type=int, default=6, help="peaks examined per window")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 
     S = [load_station(p) for p in a.tracks]
     n_t = min(len(s["t"]) for s in S)
     for s in S:
-        assert np.allclose(s["t"][:n_t], S[0]["t"][:n_t]), "dwell times differ: not the same capture/settings"
+        assert np.allclose(s["t"][:n_t], S[0]["t"][:n_t]), "dwell times differ"
+        assert np.allclose(s["dax"], S[0]["dax"]), "Doppler axes differ"
     t = S[0]["t"][:n_t]
     hop = float(np.median(np.diff(t)))
+    dax = S[0]["dax"]; f0 = float(dax[0]); df = float(dax[1] - dax[0])
     lat, lon, alt = tc.observer()
     R = tc.ecef(lat, lon, alt)
     up = R / np.linalg.norm(R)
@@ -97,113 +152,138 @@ def main():
     xs = np.arange(-a.extent_km, a.extent_km + 1e-9, a.step_km) * 1e3
     alts = np.array([float(v) for v in a.alts.split(",")])
     X, Y, H = np.meshgrid(xs, xs, alts, indexing="ij")
-    G = R + X[..., None] * east + Y[..., None] * north + H[..., None] * up     # (nx, ny, na, 3)
-    # fixed geometry: fractional range bin of every grid point for every station
-    idx = []
-    for s in S:
-        rb = np.linalg.norm(G - s["T"], axis=-1) + np.linalg.norm(G - R, axis=-1) - np.linalg.norm(s["T"] - R)
-        cell = s["rax"][1] - s["rax"][0]
-        f = (rb - s["rax"][0]) / cell
-        lo = np.clip(np.floor(f).astype(int), 0, len(s["rax"]) - 2)
-        valid = (f >= 0) & (f <= len(s["rax"]) - 1)
-        idx.append((lo, valid, rb))
-    print(f"fuse_fix -- {len(S)} illuminators: " + ", ".join(s["name"] for s in S))
-    print(f"  {n_t} dwells, hop {hop:.2f} s, window {a.window} dwells; grid {len(xs)}x{len(xs)}x{len(alts)} "
-          f"= {X.size} points at {a.step_km:.1f} km")
+    G = (R + X[..., None] * east + Y[..., None] * north + H[..., None] * up).reshape(-1, 3)
+    nP = len(G)
+    rb = np.full((nP, 3), -1, np.int64)
+    A = np.zeros((nP, 3, 2), np.float32)
+    uR = (G - R) / np.linalg.norm(G - R, axis=1, keepdims=True)
+    for i, s in enumerate(S):
+        uT = (G - s["T"]) / np.linalg.norm(G - s["T"], axis=1, keepdims=True)
+        rr = np.linalg.norm(G - s["T"], axis=1) + np.linalg.norm(G - R, axis=1) - np.linalg.norm(s["T"] - R)
+        b = np.round((rr - s["rax"][0]) / (s["rax"][1] - s["rax"][0])).astype(np.int64)
+        valid = (b >= MIN_BIN) & (b < len(s["rax"]))
+        rb[valid, i] = b[valid]
+        g = -(uT + uR) / s["lam"]
+        A[:, i, 0] = g @ east
+        A[:, i, 1] = g @ north
+    print(f"fuse_fix v2 -- " + ", ".join(s["name"] for s in S))
+    print(f"  {n_t} dwells, hop {hop:.2f} s, window {a.window}, top {a.k} Doppler peaks/station/range; "
+          f"grid {X.shape[0]}x{X.shape[1]}x{len(alts)} = {nP} points; score = weakest station")
 
-    def scores(shifts):
-        """per-window peak list for given per-station dwell shifts"""
-        zs = [np.roll(s["z"][:n_t], sh, axis=0) for s, sh in zip(S, shifts)]
+    windows = list(range(0, n_t - a.window + 1, a.window // 2))
+
+    def search(shifts):
         out = []
-        for w0 in range(0, n_t - a.window + 1, a.window // 2):
-            tot = np.zeros(X.shape, np.float32)
-            for zi, (lo, valid, _) in zip(zs, idx):
-                prof = zi[w0:w0 + a.window].sum(axis=0)                      # integrate over the window
-                v = np.maximum(prof[lo], prof[lo + 1])
-                tot += np.where(valid, v, -10.0)
-            # local maxima over x, y (any altitude), strongest first
-            flat = tot.max(axis=2)
+        for w0 in windows:
+            M = np.stack([np.roll(s["lin"][:n_t], sh, axis=0)[w0:w0 + a.window].sum(axis=0) / a.window
+                          for s, sh in zip(S, shifts)]).astype(np.float32)
+            pk = np.argsort(-M, axis=2)[:, :, :a.k].astype(np.int64)
+            best, bv = score_grid(M, pk, rb, A, f0, df, a.k)
+            sc = best.reshape(X.shape).max(axis=2)
             from scipy.ndimage import maximum_filter
-            pk = (flat == maximum_filter(flat, size=5)) & np.isfinite(flat)
-            ii = np.argwhere(pk)
-            vals = flat[pk]
-            order = np.argsort(-vals)[:a.peaks]
+            loc = (sc == maximum_filter(sc, size=5)) & (sc > 0)
+            ii = np.argwhere(loc)
+            order = np.argsort(-sc[loc])[:a.peaks]
             for o in order:
                 ix, iy = ii[o]
-                ia = int(np.argmax(tot[ix, iy]))
-                out.append(dict(w0=int(w0), score=float(vals[o]), ix=int(ix), iy=int(iy), ia=ia))
+                ia = int(np.argmax(best.reshape(X.shape)[ix, iy]))
+                flat = np.ravel_multi_index((ix, iy, ia), X.shape)
+                out.append(dict(w0=int(w0), score=float(sc[ix, iy]), p=int(flat), v=bv[flat].tolist()))
         return out
 
-    real = scores([0] * len(S))
+    tw = time.time()
+    real = search([0, 0, 0])
+    print(f"  real search {time.time()-tw:.0f} s")
     sh = int(round(NULL_SHIFT_S / hop))
     nulls = {}
-    for k in range(len(S)):
-        shifts = [0] * len(S); shifts[k] = sh
-        nulls[S[k]["name"]] = scores(shifts)
+    for k in range(3):
+        shifts = [0, 0, 0]; shifts[k] = sh
+        nulls[S[k]["name"]] = search(shifts)
     thr = max(p["score"] for v in nulls.values() for p in v)
-    print(f"  null threshold (highest peak in {len(S)} nulls, one station shifted {NULL_SHIFT_S:.0f} s each): {thr:.1f}")
+    print(f"  null threshold (highest peak, one station shifted {NULL_SHIFT_S:.0f} s, each in turn): {thr:.2f}")
     for k, v in nulls.items():
         sc = sorted((p["score"] for p in v), reverse=True)
-        print(f"    null {k:22s} top peaks {', '.join(f'{x:.1f}' for x in sc[:3])}")
+        print(f"    null {k:22s} top {', '.join(f'{x:.2f}' for x in sc[:4])}")
     rs = sorted((p["score"] for p in real), reverse=True)
-    print(f"    real                        top peaks {', '.join(f'{x:.1f}' for x in rs[:5])}")
+    print(f"    real                        top {', '.join(f'{x:.2f}' for x in rs[:8])}")
     det = [p for p in real if p["score"] > thr]
-    print(f"  REAL peaks above the null threshold: {len(det)} (nulls: 0 by construction) in "
-          f"{len(set(p['w0'] for p in det))} of {len(set(p['w0'] for p in real))} windows")
+    print(f"  REAL peaks above the null threshold: {len(det)} in {len(set(p['w0'] for p in det))} of {len(windows)} windows")
 
-    # Doppler check: one velocity must explain all three Doppler profiles
+    # FOLLOW: project a fix along its own velocity and count the dwells (+-30 s)
+    # where >= 2 stations have a CFAR detection at the predicted range and
+    # Doppler. Calibrated by doing the same for every null's top peaks in the
+    # null's own (shifted) data. The 10-25 fix: WLNO and WJFK detections sat
+    # on its projected path for 25 s.
+    dets_by = [json.load(open(p_))["detections"] for p_ in a.tracks]
+
+    def follow(P0, v, tc_, shifts):
+        n = 0
+        for dt in np.arange(-30.0, 30.01, hop):
+            P = P0 + v * dt
+            hits = 0
+            for s, dd, shf in zip(S, dets_by, shifts):
+                tt = tc_ + dt - shf * hop               # a shifted station's data comes from shf dwells earlier
+                uT = (P - s["T"]) / np.linalg.norm(P - s["T"]); uRv = (P - R) / np.linalg.norm(P - R)
+                rr = np.linalg.norm(P - s["T"]) + np.linalg.norm(P - R) - np.linalg.norm(s["T"] - R)
+                fd = float(-(uT + uRv) @ v / s["lam"])
+                key = round(float(tt) * 2) / 2
+                if any(abs(x["range_m"] - rr) < 2500 and abs(x["doppler_hz"] - fd) < 4.0 for x in s.setdefault("_by", {}).get(key, [])):
+                    hits += 1
+            n += hits >= 2
+        return int(n)
+
+    for s, dd in zip(S, dets_by):
+        s["_by"] = {}
+        for x in dd:
+            s["_by"].setdefault(round(x["t_s"] * 2) / 2, []).append(x)
+    null_support = []
+    for k, (name, v_) in enumerate(nulls.items()):
+        for p_ in sorted(v_, key=lambda q: -q["score"])[:10]:
+            P = G[p_["p"]]; vv = p_["v"][0] * east + p_["v"][1] * north
+            # in the null, station k's maps were rolled by +sh: its dwell j holds original dwell j - sh
+            null_support.append(follow(P, vv, float(t[p_["w0"]] + hop * a.window / 2), [sh if i == k else 0 for i in range(3)]))
+    print(f"  follow support, null top peaks (dwells with >= 2 stations on the path, of {int(60/hop)+1}): "
+          f"max {max(null_support)}, median {int(np.median(null_support))}")
+
     fixes = []
     for p in det:
-        P = G[p["ix"], p["iy"], p["ia"]]
-        w = slice(p["w0"], p["w0"] + a.window)
-        cand = []
-        for s, (lo, _, rb) in zip(S, idx):
-            b = int(round((rb[p["ix"], p["iy"], p["ia"]] - s["rax"][0]) / (s["rax"][1] - s["rax"][0])))
-            b = int(np.clip(b, 1, len(s["rax"]) - 2))
-            prof = s["maps"][w, b - 1:b + 2, :].max(axis=1).mean(axis=0)
-            prof[np.abs(s["dax"]) <= NOTCH] = -99
-            top = np.argsort(-prof)[:4]
-            cand.append([(float(s["dax"][j]), float(prof[j])) for j in top])
-        best = None
-        import itertools
-        for combo in itertools.product(*cand):
-            v, fres = doppler_velocity(S, P, R, [c[0] for c in combo])
-            sp = float(np.linalg.norm(v))
-            if fres < F_TOL and 40 < sp < 320 and (best is None or fres < best[0]):
-                best = (fres, v, combo)
+        P = G[p["p"]]
         la, lo_, h = ecef_to_lla(P)
-        rec = dict(t_s=float(t[p["w0"]] + hop * a.window / 2), score=p["score"], lat=la, lon=lo_, alt_m=h,
-                   doppler_ok=best is not None)
-        if best:
-            rec.update(doppler_res_hz=best[0], speed_ms=float(np.linalg.norm(best[1])),
-                       dopplers_hz=[c[0] for c in best[2]])
-        fixes.append(rec)
-    ok = [f for f in fixes if f["doppler_ok"]]
-    print(f"  Doppler-consistent (one velocity, residual < {F_TOL} Hz, 40-320 m/s): {len(ok)} of {len(fixes)}")
-
-    # persistence: link Doppler-consistent fixes
+        vv = p["v"][0] * east + p["v"][1] * north
+        tcen = float(t[p["w0"]] + hop * a.window / 2)
+        fixes.append(dict(t_s=tcen, score=p["score"], lat=la, lon=lo_, alt_m=h,
+                          ve_ms=p["v"][0], vn_ms=p["v"][1], speed_ms=float(np.hypot(*p["v"])),
+                          heading_deg=float(np.degrees(np.arctan2(p["v"][0], p["v"][1])) % 360),
+                          follow_support=follow(P, vv, tcen, [0, 0, 0]), _P=P))
+    for f in sorted(fixes, key=lambda f: f["t_s"]):
+        print(f"    fix t={f['t_s']:6.1f} s score {f['score']:.2f}  {f['speed_ms']:.0f} m/s hdg {f['heading_deg']:.0f}  "
+              f"alt {f['alt_m']:.0f} m  follow support {f['follow_support']}")
+    # persistence: the next window's fix must sit where this one's velocity puts it
     tracks = []
-    for f in sorted(ok, key=lambda f: f["t_s"]):
-        P = tc.ecef(f["lat"], f["lon"], f["alt_m"])
+    for f in sorted(fixes, key=lambda f: f["t_s"]):
+        placed = False
         for tr in tracks:
             g = tr[-1]; dt = f["t_s"] - g["t_s"]
-            if 0 < dt <= 10 and np.linalg.norm((P - tc.ecef(g["lat"], g["lon"], g["alt_m"]))[:2]) < 320 * dt + 2500:
-                tr.append(f); break
-        else:
+            dh = abs((f["heading_deg"] - g["heading_deg"] + 180) % 360 - 180)
+            if 0 < dt <= 120:
+                pred = g["_P"] + dt * (g["ve_ms"] * east + g["vn_ms"] * north)
+                miss = float(np.linalg.norm(f["_P"] - pred))
+                if miss < 2000 and abs(f["speed_ms"] - g["speed_ms"]) < 30 and dh < 15:
+                    f["link_miss_m"] = miss
+                    tr.append(f); placed = True; break
+        if not placed:
             tracks.append([f])
-    tracks = [tr for tr in tracks if len(tr) >= 3]
-    print(f"  fix tracks (>= 3 windows): {len(tracks)}")
-    for i, tr in enumerate(sorted(tracks, key=len, reverse=True)[:10]):
-        A, B = tr[0], tr[-1]
-        d = np.linalg.norm(tc.ecef(A["lat"], A["lon"], A["alt_m"]) - tc.ecef(B["lat"], B["lon"], B["alt_m"]))
-        span = B["t_s"] - A["t_s"]
-        print(f"    track {i}: {len(tr)} windows over {span:.0f} s, moved {d/1e3:.1f} km "
-              f"({d/max(span,1e-9):.0f} m/s by position) vs Doppler speed {np.median([f['speed_ms'] for f in tr]):.0f} m/s, "
-              f"alt {np.median([f['alt_m'] for f in tr]):.0f} m")
-    out = a.out or str(Path(a.tracks[0]).parent / "fuse_fix.json")
-    json.dump(dict(stations=[s["name"] for s in S], window=a.window, threshold=thr,
+    tracks = [tr for tr in tracks if len(tr) >= 2]
+    print(f"  fix tracks (>= 2 independent fixes, the later where the earlier's velocity predicts, gaps <= 120 s): {len(tracks)}")
+    for tr in tracks:
+        print(f"    {len(tr)} fixes over {tr[-1]['t_s']-tr[0]['t_s']:.1f} s, projection misses "
+              f"{', '.join(f'{f_['link_miss_m']/1e3:.2f}' for f_ in tr[1:])} km")
+    for f in fixes:
+        f.pop("_P")
+    out = a.out or str(Path(a.tracks[0]).parent / "fuse_fix_v2.json")
+    json.dump(dict(stations=[s["name"] for s in S], window=a.window, k=a.k, threshold=thr,
                    null_top={k: sorted((p["score"] for p in v), reverse=True)[:10] for k, v in nulls.items()},
-                   real_top=rs[:20], fixes=fixes, tracks=tracks), open(out, "w"), indent=1)
+                   real_top=rs[:20], null_follow_support=null_support, fixes=fixes, tracks=tracks), open(out, "w"), indent=1)
     print(f"-> {out}")
 
 
