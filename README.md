@@ -115,7 +115,7 @@ What to expect, and what will not work:
 `fm_radar.py` the FM illuminator (reconstructed reference, 1 s dwells) · `iq_capture.py` capture at any centre ·
 `fm_survey.py` rank the band · `stations/*.json` illuminator geometry for `--station=` ·
 `pr_panel.py` the range-Doppler scope (localhost :8650) ·
-`two_channel_radar.py` passive radar on a recorded reference (any coherent two-channel SDR, any waveform) · `radar_site.py` the site file · `make_stations.py` station files from the FCC database · `site_check.py` readiness
+`two_channel_radar.py` passive radar on a recorded reference (any coherent two-channel SDR, any waveform) · `dvbt_decode.py` DVB-T settings (TPS), MER and transport stream via gr-dtv · `radar_site.py` the site file · `make_stations.py` station files from the FCC database · `site_check.py` readiness
 
 Tests: `test_pr_core.py` (synthetic truth, 11 gates) · `test_flatten_preserves.py`
 (flattening must not eat echoes).
