@@ -21,6 +21,7 @@ import glob
 import json
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import time
 from pathlib import Path
@@ -85,6 +86,8 @@ def main():
     ap.add_argument("--truth", action="store_true", help="also run the truth chain where a truth file exists")
     ap.add_argument("--only", default=None, choices=("fm", "vsb", "atsc3"))
     ap.add_argument("--skip-done", action="store_true")
+    ap.add_argument("--fm-parallel", type=int, default=8,
+                    help="FM stations of one leg processed at once (each fm_radar is one core, ~100 MB)")
     a = ap.parse_args()
     sd = Path(a.sweep_dir)
     man = json.load(open(sd / "manifest.json"))
@@ -96,12 +99,30 @@ def main():
             rows.append(dict(tag=leg["tag"], kind=leg["kind"], status="capture failed/refused"))
             continue
         meta = leg["meta"]
-        for stp in station_files(leg["kind"], leg):
+        stations = station_files(leg["kind"], leg)
+        fm_rc = {}
+        if leg["kind"] == "fm" and a.fm_parallel > 1:
+            todo = [stp for stp in stations if not (a.skip_done and (sd / f"tracks_{Path(stp).stem}.json").exists())]
+            def one(stp):
+                name = Path(stp).stem
+                t0 = time.time()
+                rc = run([PY, str(HERE / "fm_radar.py"), leg["capture"], f"--station={stp}",
+                          "--out", str(sd / f"tracks_{name}.json")], sd / f"run_{name}.log")
+                return stp, (rc, round(time.time() - t0))
+            print(f"[sweep] {leg['tag']}: {len(todo)} FM stations, {a.fm_parallel} at a time", flush=True)
+            with ThreadPoolExecutor(max_workers=a.fm_parallel) as ex:
+                for stp, r in ex.map(one, todo):
+                    fm_rc[stp] = r
+                    print(f"[sweep]   done {Path(stp).stem} rc={r[0]} {r[1]} s", flush=True)
+        for stp in stations:
             st = json.load(open(stp))
             name = Path(stp).stem
             out = sd / f"tracks_{name}.json"
             t0 = time.time()
-            if not (a.skip_done and out.exists()):
+            if stp in fm_rc:
+                rc = fm_rc[stp][0]
+                t0 = time.time() - fm_rc[stp][1]
+            elif not (a.skip_done and out.exists()):
                 if leg["kind"] == "fm":
                     rc = run([PY, str(HERE / "fm_radar.py"), leg["capture"], f"--station={stp}", "--out", str(out)],
                              sd / f"run_{name}.log")

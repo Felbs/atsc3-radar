@@ -140,7 +140,8 @@ def main():
     ap.add_argument("capture")
     ap.add_argument("--station", required=True, help="json: fc_hz, tx_lat, tx_lon, tx_alt_m, ...")
     ap.add_argument("--fs-in", type=float, default=None, help="capture rate (default: sidecar)")
-    ap.add_argument("--decim", type=int, default=8)
+    ap.add_argument("--decim", type=int, default=None,
+                    help="input/output rate ratio (default: capture rate / station fs_hz, else 8)")
     ap.add_argument("--dwell", type=float, default=1.0)
     ap.add_argument("--hop", type=float, default=0.5)
     ap.add_argument("--max-range-km", type=float, default=120.0)
@@ -168,7 +169,11 @@ def main():
     offset = fc - fc_cap
     if abs(offset) > 0.45 * fs_in:
         raise SystemExit(f"station {fc/1e6:.3f} MHz is outside the capture ({fc_cap/1e6:.3f} +- {fs_in/2e6:.1f} MHz)")
-    fs = fs_in / a.decim
+    # a wide capture (8 MS/s, 40 FM channels) must still land at the station's
+    # surveillance rate (250 kS/s): at 1 MS/s the adjacent channels sit inside
+    # the band, the reference cannot model them, and cancellation caps at ~12 dB
+    decim = a.decim or int(round(fs_in / float(st.get("fs_hz") or fs_in / 8)))
+    fs = fs_in / decim
     lam = C / fc
     bin_m = C / fs
     n_total = os.path.getsize(a.capture) // 4
@@ -196,7 +201,7 @@ def main():
         if offset:
             n0 = int(t * fs_in)
             x = x * np.exp(-2j * np.pi * offset * (np.arange(len(x)) + n0) / fs_in).astype(np.complex64)
-        x = decimate(x, a.decim)
+        x = decimate(x, decim)
         x -= x.mean()
         ref = reconstruct(x, fs) if a.ref == "recon" else x.copy()
         surv = P.cancel_direct(x, ref, a.taps)
