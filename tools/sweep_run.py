@@ -100,6 +100,10 @@ def main():
             continue
         meta = leg["meta"]
         stations = station_files(leg["kind"], leg)
+        if not stations:
+            row = dict(tag=leg["tag"], kind=leg["kind"], status="no station file")
+            rows.append(row); print(json.dumps(row), flush=True)
+            continue
         fm_rc = {}
         if leg["kind"] == "fm" and a.fm_parallel > 1:
             todo = [stp for stp in stations if not (a.skip_done and (sd / f"tracks_{Path(stp).stem}.json").exists())]
