@@ -19,7 +19,7 @@ only check is internal: its range walk against its own Doppler.
 
 | channel | signal | antenna | blocks locked | sync-symbol SNR | cancellation | tracks | longest track | walk vs Doppler |
 |---|---|---|---|---|---|---|---|---|
-| RF7 WJLA | 8-VSB | discone | 59/59 | 19.5 dB | 21.3 dB | 129 | 120 dwells | 0.1 % |
+| RF7 WJLA | 8-VSB | discone | 58/59 | 19.5 dB | 21.3 dB | 85 | 100 dwells | 6.0 % |
 | RF9 WUSA | 8-VSB | discone | 0/59 | 7.2 dB | 10.2 dB | 3 | 29 | 9.7 % |
 | RF12 WBAL | 8-VSB | discone | 0/59 | 1.7 dB | 5.2 dB | 5 | 7 | 6.1 % |
 | RF21 WMPT | 8-VSB | yagi | 59/59 | 28.1 dB | 28.1 dB | 33 | 117 | 5.6 % |
@@ -33,6 +33,10 @@ only check is internal: its range walk against its own Doppler.
 | RF25 WNUV | ATSC 3.0 | yagi | | | | 7 | 48 | 2.2 % |
 
 Dwells are 164 ms for 8-VSB, so RF31's longest track is 53 s of a 60 s capture.
+RF7 is after field-comb rejection (below): 1029 of its 2613 detections were
+the comb, and its track count fell from 129 to 85. Its farthest track, 80
+dwells from 57.2 to 53.8 km, walks at -257 m/s against -258 predicted. One
+block of the rerun came back VOID while the machine was busy with fusion runs.
 
 Six of the eleven 8-VSB channels work as illuminators from here: the five
 DC-area UHF transmitters and RF7. The Baltimore channels (RF12, 26, 27) and
@@ -103,7 +107,7 @@ that never locked -- which is why the table now has a lock column.
    without a row; five FM stations in the overlap of two spans were written
    to one file twice. Both now report or name per span.
 
-Also built and tested on the way, not used in the table:
+Also built and tested on the way:
 
 - **Trellis decoding** (`tools/vsb_trellis.py`, `vsb_ref.py radar --trellis`).
   The code was identified from the RF31 decisions rather than assumed: one
@@ -111,17 +115,55 @@ Also built and tested on the way, not used in the table:
   On synthetic symbols it takes 15 dB from 19 % symbol errors to 0.4 %. The
   Baltimore channels are below its threshold, so it does not rescue them; it
   is for channels between roughly 13 and 20 dB.
-- **A three-tower position fix** from one FM capture (`tools/fix_position.py`,
-  `tools/fuse_fix.py`; WBQB 101.5, WLNO 104.1, WJFK 106.7). No fix beats its
-  null yet. A one-dwell shift is not a null (an aircraft moves 100 m in 0.5 s,
-  inside one 1.2 km cell), so the null shifts one station by 60 s; and a
-  range-only fused score loses to it. Doppler has to be inside the fused
-  score.
+- **The 8-VSB field comb** (`vsb_ref.py comb_flags`). RF7 put a ladder of
+  detections at 0.96 / 1.92 / 2.80 / 5.68 km for 20 s, at +-1, 3 and 4 x
+  41.3 Hz (the field rate) in mirror pairs. It is not static clutter (a
+  second cancellation pass against the CAF reference removes 0.01 dB), not
+  slow clutter (Doppler-shifted cancellation taps change nothing), and no
+  second pilot is visible. Its cause is still open; its signature is not:
+  one range cell, one dwell, three or more detections on one f0 + k x 41.3 Hz
+  comb. Those, and every comb-line detection in a cell that shows it in five
+  or more dwells, are flagged and kept out of tracks. On RF21/31/34/35/36 the
+  rule flags 0-3 detections and no point of any track of 50 dwells or more.
+
+## A position from one receiver: three FM towers at once
+
+The 102-108 MHz span holds WBQB 101.5, WLNO 104.1 and WJFK 106.7, three
+towers in three directions, recorded at the same instant. Each gives a
+bistatic range and a Doppler; together they give a position and a velocity.
+This is the multistatic fix that otherwise needs a second receiver.
+
+Matching per-station detections (`tools/fix_position.py`) found nothing a
+null did not. So did fusing the maps on range alone (`tools/fuse_fix.py`
+v1): that searches about a million range-cell triples, and noise reached an
+aircraft's score (165.7 against a null of 162.5).
+
+`tools/fuse_fix.py` v2 puts Doppler inside the score. At each grid point, two
+stations' Doppler peaks fix a horizontal velocity, which predicts the third
+station's Doppler to within one 0.59 Hz cell. The score is the weakest
+station's value there, chosen before the run. The nulls shift one station by
+60 s, each in turn. A one-dwell shift is not a null: an aircraft moves 100 m
+in 0.5 s, inside one 1.2 km cell.
+
+| | |
+|---|---|
+| highest null peak (the threshold) | 5.45 |
+| real peaks above it | 10.66 at 8.0 s, 5.54 at 69.5 s |
+| fix A | 234 m/s, heading 53 deg, 11,084 m |
+| fix B | 232 m/s, heading 53 deg, 11,102 m |
+| A projected 61.5 s along its own velocity, distance from B | 0.62 km |
+| follow support, A / B (dwells in +-30 s with two or more stations' detections on the projected range and Doppler, of 121) | 27 / 42 |
+| follow support, the 30 top null peaks | median 0, max 13 |
+
+A and B come from windows with no data in common. They are one aircraft at
+cruise, positioned twice from one receiver. WBQB, the weakest of the three at
+22 dB of cancellation, sees it only in the fix windows; WLNO and WJFK carry
+the follow. The positions are in the lab output for the ADS-B check.
 
 ## Open
 
-- ADS-B truth for every leg when the 2026-10-25 history publishes.
-- RF7: 697 detections at 0.96 km, 191 at 1.92 km, 394 at 2.8 km -- a ladder in
-  range, fixed structure rather than aircraft.
-- Three-tower fix with Doppler in the fused score.
+- ADS-B truth for every leg when the 2026-10-25 history publishes, and the
+  fused fix's two positions against it.
+- What drives the RF7 field comb.
+- Fused fixes on the other FM spans (stations on three different towers).
 - RF15 again (voided capture).
