@@ -45,6 +45,7 @@ The goal that counts: aircraft that are *not* on ADS-B.
 7. `docs/UNMATCHED_1024.md` — first pass at the non-ADS-B goal: 31 of 32 far tracks explained, one candidate held pending the tower-end truth
 8. `docs/FM_VS_ATSC3_1024.md` — FM broadcast as the illuminator on the same receiver: farther, 1 Hz Doppler, 1.2 km cells; what HD Radio does to cancellation
 9. `docs/FM_GAIN_PAIR_1024.md` — the FM gain pair: no front-end products, one aircraft on all 239 dwells, why "fixed cells" on FM are consecutive arrivals
+10. `docs/SWEEP_1025.md` — every broadcast channel in one pass: 6 of 11 8-VSB channels and 32 of 59 FM stations lock, and the five bugs the sweep found
 
 ## Tools
 `pr_core.py` CAF/ECA/CFAR · `pr_pilots.py` pilot-lattice synthesis ·

@@ -63,10 +63,21 @@ def summarize_tracks(path):
                longest_track=best["n"] if best else 0,
                longest_walk_pct=best["agreement_pct"] if best else None,
                cancellation_db=round(float(sorted(canc)[len(canc) // 2]), 1) if canc else None)
+    if canc and not blocks:
+        # FM: a reference that cancels < 10 dB did not reconstruct the station
+        # (17 of 59 in the 10-25 sweep: each 200 kHz from a station >= 22 dB)
+        out["locked"] = out["cancellation_db"] >= 10.0
     if blocks:
         out["eq_snr_db"] = round(sorted(b["eq_snr_db"] for b in blocks)[len(blocks) // 2], 1)
         out["clock_ppm"] = round(sorted(b["clock_ppm"] for b in blocks)[len(blocks) // 2], 2)
-        out["blocks_locked"] = len(blocks)
+        # a block "returned" is not a block locked: RF22 returned 59 blocks at
+        # +20.9 ppm and 3.6 dB (noise). Locked = known sync symbols >= 10 dB SNR.
+        out["blocks"] = len(blocks)
+        if all("sync_snr_db" in b for b in blocks):
+            out["sync_snr_db"] = round(sorted(b["sync_snr_db"] for b in blocks)[len(blocks) // 2], 1)
+            out["blocks_locked"] = sum(b["sync_snr_db"] >= 10.0 for b in blocks)
+        else:
+            out["blocks_locked"] = None
     return out
 
 
@@ -106,9 +117,10 @@ def main():
             continue
         fm_rc = {}
         if leg["kind"] == "fm" and a.fm_parallel > 1:
-            todo = [stp for stp in stations if not (a.skip_done and (sd / f"tracks_{Path(stp).stem}.json").exists())]
+            todo = [stp for stp in stations if not (a.skip_done and (sd / f"tracks_{leg['tag']}_{Path(stp).stem}.json").exists()
+                                                    or a.skip_done and (sd / f"tracks_{Path(stp).stem}.json").exists())]
             def one(stp):
-                name = Path(stp).stem
+                name = f"{leg['tag']}_{Path(stp).stem}"
                 t0 = time.time()
                 rc = run([PY, str(HERE / "fm_radar.py"), leg["capture"], f"--station={stp}",
                           "--out", str(sd / f"tracks_{name}.json")], sd / f"run_{name}.log")
@@ -121,6 +133,8 @@ def main():
         for stp in stations:
             st = json.load(open(stp))
             name = Path(stp).stem
+            if leg["kind"] == "fm" and not (sd / f"tracks_{name}.json").exists():
+                name = f"{leg['tag']}_{name}"
             out = sd / f"tracks_{name}.json"
             t0 = time.time()
             if stp in fm_rc:
@@ -163,7 +177,7 @@ def main():
             print(json.dumps(row), flush=True)
             json.dump(rows, open(sd / "sweep_summary.json", "w"), indent=1)
     # the table
-    cols = ["tag", "station", "fc_mhz", "blocks_locked", "eq_snr_db", "cancellation_db", "detections", "tracks",
+    cols = ["tag", "station", "fc_mhz", "blocks", "blocks_locked", "sync_snr_db", "eq_snr_db", "cancellation_db", "locked", "detections", "tracks",
             "longest_track", "longest_walk_pct", "matches", "matches_far", "aircraft", "in_map", "verdict_far", "seconds"]
     lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
     for r in rows:
