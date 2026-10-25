@@ -292,7 +292,7 @@ def to_tx_grid(zz, p0, period):
     return frac_interp(zz, tau), m0, start, r
 
 
-def equalize_and_slice(zt, m0, L=96, n_train=400_000, iters=2):
+def equalize_and_slice(zt, m0, L=96, n_train=400_000, iters=2, return_u=False):
     """LS fractionally-spaced equalizer on complex zt (2 sps); real output at the
     symbol instants. Trained on sync symbols, then decision-directed (batch)."""
     n_sym = len(zt) // 2
@@ -340,12 +340,24 @@ def equalize_and_slice(zt, m0, L=96, n_train=400_000, iters=2):
     sigma = np.sqrt(np.mean(err ** 2))
     from math import erfc
     ser = 2 * (7 / 8) * 0.5 * erfc(1 / (sigma * np.sqrt(2)))
-    return a, is_sync, dict(eq_snr_db=float(snr_db), sync_err=sync_err, ser_est=float(ser), sigma=float(sigma))
+    # unbiased SNR from the KNOWN segment-sync symbols: decision-directed eq_snr_db
+    # measures error against our own (partly wrong) decisions and reads 15 dB on
+    # channels whose true SNR is ~11 dB (trellis change rate matches synthetic 11 dB)
+    vs = valid & is_sync
+    sync_snr_db = 10 * np.log10(21.0 / np.mean((u[vs] - sync_val[vs]) ** 2))
+    eqd = dict(eq_snr_db=float(snr_db), sync_snr_db=float(sync_snr_db), sync_err=sync_err, ser_est=float(ser), sigma=float(sigma))
+    if return_u:
+        return a, is_sync, eqd, u.astype(np.float32)
+    return a, is_sync, eqd
 
 
-def field_sync_mask(a, is_sync, m0):
+def field_sync_mask(a, is_sync, m0, u=None):
     """Symbols belonging to field-sync segments: the segment whose data repeats
-    exactly FIELD segments later (PN511 is identical every field)."""
+    exactly FIELD segments later (PN511 is identical every field).
+    With u (the equalizer's soft output) the test is the normalised correlation
+    of the two segments' soft values > 0.5 (data ~0.00, field sync 0.89 at
+    15 dB); hard-decision agreement > 0.9 found NO field sync below ~20 dB,
+    because a 10 % symbol error rate leaves ~43 % agreement."""
     n_sym = len(a)
     s0 = (m0 // 2) % SEG
     first = s0 if s0 == 0 else s0 - SEG + SEG
@@ -356,25 +368,36 @@ def field_sync_mask(a, is_sync, m0):
         return mask
     score = np.zeros(nseg)
     for i in range(nseg - FIELD):
-        x = a[seg_starts[i] + 4:seg_starts[i] + 515]
-        y = a[seg_starts[i + FIELD] + 4:seg_starts[i + FIELD] + 515]
-        score[i] = np.mean(x == y)
-    hits = np.where(score > 0.9)[0]
+        if u is not None:
+            x = u[seg_starts[i] + 4:seg_starts[i] + 515]
+            y = u[seg_starts[i + FIELD] + 4:seg_starts[i + FIELD] + 515]
+            score[i] = np.dot(x, y) / np.sqrt(np.dot(x, x) * np.dot(y, y) + 1e-12)
+        else:
+            x = a[seg_starts[i] + 4:seg_starts[i] + 515]
+            y = a[seg_starts[i + FIELD] + 4:seg_starts[i + FIELD] + 515]
+            score[i] = np.mean(x == y)
+    hits = np.where(score > (0.5 if u is not None else 0.9))[0]
     for h in hits:
         for j in (h, h + FIELD):
             mask[seg_starts[j]:seg_starts[j] + SEG] = True
     return mask
 
 
-def build_block(x, fs):
-    """One block of capture -> (surv, ref_full, ref_blank) at FS3, plus diagnostics."""
+def build_block(x, fs, trellis=False):
+    """One block of capture -> (surv, ref_full, ref_blank) at FS3, plus diagnostics.
+    trellis=True: symbol decisions from the Viterbi decoder (vsb_trellis.py)
+    instead of the slicer -- the difference at 15 dB equalized SNR."""
     z, ratio = to_fs2(x, fs)
     zz, fp, pil_db = pilot_lock(z)
     p0, per, nseg, rms, mdb = segment_sync_fit(zz)
     ppm = (per / (2 * SEG) - 1) * 1e6
     zt, m0, start, r = to_tx_grid(zz, p0, per)
-    a, is_sync, eq = equalize_and_slice(zt, m0)
-    fmask = field_sync_mask(a, is_sync, m0)
+    a, is_sync, eq, u = equalize_and_slice(zt, m0, return_u=True)
+    fmask = field_sync_mask(a, is_sync, m0, u)
+    if trellis:
+        import vsb_trellis
+        a, changed = vsb_trellis.decide(u, a, m0, fmask)
+        eq["trellis_changed"] = changed
     ref_full = modulate(a + PILOT)
     a_blank = np.where(is_sync | fmask, 0.0, a).astype(np.float32)
     ref_blank = modulate(a_blank)
@@ -518,12 +541,13 @@ def check(path, t0=1.0):
 # ---------------------------------------------------------------------- radar
 def _radar_block(job):
     """One block: build the reference, then ECA + CAF + CFAR per dwell."""
-    (path, fs, t_blk, block, dwell_n, taps, max_range_km, doppler, n_doppler, pfa, notch, maps_dir) = job
+    (path, fs, t_blk, block, dwell_n, taps, max_range_km, doppler, n_doppler, pfa, notch, maps_dir) = job[:12]
+    trellis = job[12] if len(job) > 12 else False
     x = load(path, fs, t_blk, block + 0.02)
     if x is None:
         return t_blk, None, [], [], "short read"
     try:
-        surv, rf, rb, d = build_block(x, fs)
+        surv, rf, rb, d = build_block(x, fs, trellis=trellis)
     except Exception as e:                                     # a bad block is VOID, not fatal
         return t_blk, None, [], [], f"{type(e).__name__}: {e}"
     bin_m = C / FS3
@@ -572,6 +596,7 @@ def radar(argv):
     ap.add_argument("--notch-hz", type=float, default=15.0)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--save-maps", action="store_true")
+    ap.add_argument("--trellis", action="store_true", help="Viterbi-decoded symbol decisions (vsb_trellis.py)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
     side = json.load(open(os.path.splitext(a.capture)[0] + ".json"))
@@ -585,12 +610,12 @@ def radar(argv):
     bin_m = C / FS3
     lam = C / float(json.load(open(a.station))["fc_hz"])
     print(f"[vsb ] {os.path.basename(a.capture)}  {secs:.0f} s in {a.block:.1f} s blocks x {a.jobs} jobs; "
-          f"FS3 {FS3/1e6:.4f} MS/s (bin {bin_m:.1f} m), dwell {a.dwell_samples/FS3*1e3:.0f} ms, ECA {a.taps} taps", flush=True)
+          f"FS3 {FS3/1e6:.4f} MS/s (bin {bin_m:.1f} m), dwell {a.dwell_samples/FS3*1e3:.0f} ms, ECA {a.taps} taps; decisions {'trellis' if a.trellis else 'slicer'}", flush=True)
     jobs = []
     t_blk = a.t0
     while t_blk + a.block <= a.t0 + secs + 1e-6:
         jobs.append((a.capture, fs, round(t_blk, 6), a.block, a.dwell_samples, a.taps, a.max_range_km,
-                     a.doppler, a.n_doppler, a.pfa, a.notch_hz, maps_dir))
+                     a.doppler, a.n_doppler, a.pfa, a.notch_hz, maps_dir, a.trellis))
         t_blk += a.block
     dets, diags, canc = [], [], []
     tw = time.time()
