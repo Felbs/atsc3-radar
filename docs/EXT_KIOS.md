@@ -59,3 +59,21 @@ gap-tolerant linker, on a waveform this repo cannot decode (DVB-T COFDM),
 at 37.5 m cells instead of 42 m, against a 3.7 kg drone at a few hundred
 metres instead of an airliner at 50 km. The reference-rebuilding half of
 the repo was not exercised: the recording carries its own.
+
+**Watching it (no).** `tools/dvbt_decode.py` runs gr-dtv's DVB-T
+receiver on the file. The transmitter's settings come off the air, from
+the TPS carriers, four frames in a row on both channels: 8K, guard 1/4,
+16-QAM, non-hierarchical, code rate 5/6. The guard matches the symbol
+period measured independently (8960 samples at 8 MS/s). gr-dtv's symbol
+acquisition steps its FFT window by up to +-6 samples between symbols,
+which tilts each symbol's phase across the band; the TPS reader removes
+that tilt with the continual pilots (TPS coherence 0.83 / 0.91). But the
+picture needs 14-15 dB of MER at 16-QAM 5/6, and the recording does not
+have it: gr-dtv's equalizer gives 5.6-5.9 dB on the reference channel
+(-3 to -1 dB on the surveillance channel, whose channel estimate fails),
+a per-symbol pilot equalizer 6.9 dB, and the cyclic-prefix correlation,
+which needs no equalizer at all, implies about 10 dB. No equalizer
+recovers more than the signal has, so this file is at least 4 dB short of
+a transport stream. The antennas were aimed for radar, not reception. The
+chain is ready for a stronger recording: `--tps` for settings and MER,
+then `--qam 16 --rate 5/6 --out x.ts`, then `ffplay x.ts`.
