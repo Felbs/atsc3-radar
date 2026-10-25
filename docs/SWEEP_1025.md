@@ -160,10 +160,81 @@ cruise, positioned twice from one receiver. WBQB, the weakest of the three at
 22 dB of cancellation, sees it only in the fix windows; WLNO and WJFK carry
 the follow. The positions are in the lab output for the ADS-B check.
 
+## Follow-ups, 2026-10-25 afternoon
+
+**RF15 again.** Recaptured 15:40Z (-3.4 dBFS, 0 overflows): 59/59 blocks
+locked, sync-symbol SNR 27.8 dB, cancellation 28.8 dB, 85 tracks, longest
+181 dwells at 1.2 %. Seven of the eleven 8-VSB channels work.
+
+**The RF7 comb was an episode.** RF7 recaptured 13.5 h after the sweep:
+3 field-comb detections of 2745 (1029 of 2613 at 02:08Z). Something on
+the air that night, not the transmitter's or this receiver's fixed
+behaviour. The rule stays.
+
+**The 17 FM stations that never locked are not stations.** Power in the
+upper half of the channel (+30..+70 kHz) against the lower half: 7-30 dB
+lopsided on all 17, within 4 dB on all 42 others. The loud half faces the
+strong neighbour: it is that station's HD Radio sideband (129-198 kHz from
+its carrier), with no FM carrier under it. No filter rescues them.
+`fm_radar.py` now measures this first and writes `status: no carrier`
+instead of running (`--force` overrides).
+
+**Trellis decoding, measured where it matters.** RF31 with noise added, a
+-50 dB echo planted at 20 km / +150 Hz, the echo's SNR in the map:
+
+| sync-symbol SNR | slicer | trellis |
+|---|---|---|
+| 29.2 dB | 39.8 dB | 39.8 dB |
+| 20.5 dB | 29.1 dB | 30.8 dB |
+| 16.9 dB | 17.0 dB | 27.2 dB |
+| 14.4 dB | 9.4 dB | 20.8 dB |
+
+Cancellation reads WORSE with the trellis there (17.4 vs 18.5 dB at
+16.9): the slicer's errors follow the noise, so its reference "cancels"
+noise too. Cancellation is not the measure of a reference at low SNR.
+`vsb_ref.py` now decodes per block with the trellis below 25 dB sync SNR
+(`--trellis auto`, the default). RF7 (19.8 dB) on the recapture: 88 ->
+123 tracks, 2745 -> 3730 detections; an outbound aircraft 28.7 -> 38.3 km
+at 0.5 % now holds as one 211-dwell track (the slicer detected 155 of its
+points, median 13.5 dB; trellis 211, 15.4 dB).
+
+**The three-tower fix, checked on towers it did not use.** The fix's
+position and velocity predict its range and Doppler on every other
+station in the capture. Along its own path (+-15 s), against 100-400
+random paths at the same altitude and speed:
+
+| held-out station | t = 8 s | t = 69.5 s | random-path 99th percentile |
+|---|---|---|---|
+| 105.1 WAVA | 9.3 | 6.1 | 1.6 |
+| 107.7 WWWT | 10.2 | 28.3 | 1.4-1.9 |
+| 103.5 WTOP | 5.1 | 10.6 | 1.4 |
+| 107.3 WLVW | 124.5 | 10.8 | 1.6-1.8 |
+
+`fuse_fix.py --heldout` now does this for every top peak and every null
+peak. On the 102-108 span the 30 null peaks are seen by 0 held-out
+stations each; 15 of the 20 best real peaks by 2-4 of 4, most of them
+BELOW the 60 s-shift threshold: the aircraft above, now from t = 3.5 to
+92 s, and a second one at the same altitude, 9-11 km from it, on the
+reciprocal heading. The shift null is too strict in a busy sky.
+
+The other spans, with the rule "seen by more held-out stations than any
+null peak":
+
+| span | set | null peaks seen by | real peaks |
+|---|---|---|---|
+| 88-96 | WFLS 93.3, WIAD 94.7, WPRS 92.7; held out WETA, WGTS, WPFW, WKYS | <= 2 | 7 seen by 4 of 4: three aircraft (222 deg / 248 m/s; 163 deg / 295 m/s; 283 deg / 167 m/s low) |
+| 96-104 | WBIG 100.3, WBQB 101.5, WDCH 99.1; held out WMZQ, WTVR, WWDC, WIHT | <= 3 | best 3: nothing |
+
+Here null peaks are seen too: a null shifts one station, the other two
+still hold the real aircraft, and a null peak can sit on one. The 88-96
+held-out stations are two towers, not four (WETA/WGTS and WPFW/WKYS share
+sites). All of it waits on ADS-B.
+
 ## Open
 
 - ADS-B truth for every leg when the 2026-10-25 history publishes, and the
   fused fix's two positions against it.
 - What drives the RF7 field comb.
 - Fused fixes on the other FM spans (stations on three different towers).
-- RF15 again (voided capture).
+- ADS-B for the 88-96 MHz fixes and the second 102-108 aircraft.
+- A quiet-sky session (scheduled 2026-10-26 08:00Z).

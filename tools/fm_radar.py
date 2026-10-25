@@ -41,6 +41,9 @@ import pr_core as P                                            # noqa: E402
 C = 2.998e8
 
 
+HD_ASYM_DB = 6.0
+
+
 def load_block(path, fs_in, t0, secs):
     n0 = int(t0 * fs_in)
     n = int(secs * fs_in)
@@ -135,6 +138,23 @@ def link_tracks(dets, bin_m, lam, max_dr_bins=1.5, max_df=8.0, min_n=3):
     return out
 
 
+def channel_asymmetry_db(path, fs_in, offset, t0=0.0, secs=2.0):
+    """Power of the channel's upper half (+30..+70 kHz) over its lower half, in dB.
+
+    An FM carrier fills both halves alike (|asym| <= 4 dB on all 42 real
+    stations of the 2026-10-25 sweep). A frequency with no receivable
+    station but a strong neighbour 200 kHz away holds only that neighbour's
+    HD Radio sideband (129-198 kHz from its carrier), which covers one half:
+    7-30 dB on all 17 such channels, every one cancelling <= 0.7 dB."""
+    x = load_block(path, fs_in, t0, secs)
+    N = int(round(fs_in / 1e3))                       # 1 kHz bins
+    x = x[: len(x) // N * N].reshape(-1, N)
+    P_ = np.mean(np.abs(np.fft.fftshift(np.fft.fft(x * np.hanning(N), axis=1), axes=1)) ** 2, axis=0)
+    fr = (np.arange(N) - N // 2) * fs_in / N
+    band = lambda a, z: 10 * np.log10(np.mean(P_[(fr >= offset + a) & (fr <= offset + z)]) + 1e-30)
+    return band(30e3, 70e3) - band(-70e3, -30e3)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("capture")
@@ -156,6 +176,7 @@ def main():
     ap.add_argument("--secs", type=float, default=None)
     ap.add_argument("--save-maps", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--force", action="store_true", help="run even when the channel holds only a neighbour's HD sideband")
     a = ap.parse_args()
 
     st = json.load(open(a.station))
@@ -189,6 +210,17 @@ def main():
     print(f"[fm  ] map: {a.max_range_km:.0f} km x +-{a.doppler:.0f} Hz, {a.n_doppler} Doppler bins "
           f"({2*a.doppler/a.n_doppler:.2f} Hz each); notch +-{a.notch_hz} Hz; "
           f"expected CFAR false alarms/dwell ~ {a.pfa * int(a.max_range_km*1e3/bin_m) * a.n_doppler:.2f}")
+    asym = channel_asymmetry_db(a.capture, fs_in, offset, a.t0)
+    if abs(asym) >= HD_ASYM_DB and not a.force:
+        side_ = "upper" if asym > 0 else "lower"
+        print(f"[fm  ] NO CARRIER: the {side_} half of the channel is {abs(asym):.1f} dB above the other -- "
+              f"a neighbour's HD Radio sideband, not a station (--force runs it anyway)")
+        json.dump(dict(capture=os.path.abspath(a.capture), fs_hz=fs, fc_hz=fc, station=st, status="no carrier",
+                       channel_asymmetry_db=float(asym), cancellation_db=[], n_detections=0, tracks=[], detections=[],
+                       note="channel holds only an adjacent station's HD Radio sideband"),
+                  open(out, "w"), indent=1)
+        print(f"-> {out}")
+        return
     dets = []
     canc = []
     t = a.t0
@@ -235,7 +267,7 @@ def main():
               f"fd {tr['doppler_mean_hz']:+.1f} Hz | observed {tr['observed_rate_ms']:+.1f} m/s vs predicted "
               f"{tr['predicted_rate_ms']:+.1f} ({tr['agreement_pct']:.0f}% off), max {max(tr['snr_db']):.1f} dB")
     json.dump(dict(capture=os.path.abspath(a.capture), fs_hz=fs, fc_hz=fc, station=st,
-                   dwell_s=a.dwell, hop_s=a.hop, ref=a.ref, taps=a.taps, cancellation_db=[float(c) for c in canc],
+                   channel_asymmetry_db=float(asym), dwell_s=a.dwell, hop_s=a.hop, ref=a.ref, taps=a.taps, cancellation_db=[float(c) for c in canc],
                    n_detections=len(dets), tracks=tracks, detections=dets,
                    note="FM illuminator; CANDIDATES until truth_compare says otherwise"),
               open(out, "w"), indent=1)

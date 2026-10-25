@@ -19,7 +19,7 @@ as files.
 
 Usage:
   python tools/adsb_history.py fetch 2026-10-24 [--kind prod|mlatonly]      # download the split tar
-  python tools/adsb_history.py truth <meta.json> [--pad 300] [--kinds prod,mlatonly]
+  python tools/adsb_history.py truth <meta.json> [<meta.json> ...] [--pad 300] [--kinds prod,mlatonly]
         -> writes <meta stem>.hist.adsb.jsonl and points a copy of the meta at it
 """
 import gzip
@@ -127,34 +127,46 @@ def rows_from_trace(t, box, t0, t1, source):
     return out
 
 
-def truth(meta_path, pad=300.0, kinds=("prod", "mlatonly")):
+def truth(meta_paths, pad=300.0, kinds=("prod", "mlatonly")):
+    """Truth for one or many captures; each day's release is read once for all of them."""
     import truth_compare as tc
-    meta = json.load(open(meta_path))
+    import datetime as dt
+    if isinstance(meta_paths, (str, Path)):
+        meta_paths = [meta_paths]
     lat, lon, alt = tc.observer()
     blat, blon = 0.6, 0.75
     box = (min(lat, tc.TX_LAT) - blat, max(lat, tc.TX_LAT) + blat,
            min(lon, tc.TX_LON) - blon, max(lon, tc.TX_LON) + blon)
-    t0 = float(meta["t_launch_unix"]) - pad
-    t1 = float(meta.get("t_done_unix", meta["t_launch_unix"] + meta["secs"])) + pad
-    import datetime as dt
-    day = dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime("%Y-%m-%d")
-    rows = []
-    n_ac = {}
-    for kind in kinds:
-        d = HIST / release_tag(day, kind)
-        parts = sorted(p for p in d.glob(f"{release_tag(day, kind)}*")) if d.exists() else []
-        if not parts:
-            print(f"[hist] {kind} {day}: not downloaded (python tools/adsb_history.py fetch {day} --kind {kind})")
-            continue
-        src = 2 if kind == "mlatonly" else 0
-        k = 0
-        for name, t in iter_traces(parts):
-            r = rows_from_trace(t, box, t0, t1, src)
-            if r:
-                rows += r
-                k += 1
-        n_ac[kind] = k
-        print(f"[hist] {kind} {day}: {k} aircraft in box/window", flush=True)
+    jobs = []
+    for mp in meta_paths:
+        meta = json.load(open(mp))
+        t0 = float(meta["t_launch_unix"]) - pad
+        t1 = float(meta.get("t_done_unix", meta["t_launch_unix"] + meta["secs"])) + pad
+        day = dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime("%Y-%m-%d")
+        jobs.append(dict(path=mp, meta=meta, t0=t0, t1=t1, day=day, rows=[], n_ac={}))
+    for day in sorted({j["day"] for j in jobs}):
+        J = [j for j in jobs if j["day"] == day]
+        for kind in kinds:
+            d = HIST / release_tag(day, kind)
+            parts = sorted(p for p in d.glob(f"{release_tag(day, kind)}*")) if d.exists() else []
+            if not parts:
+                print(f"[hist] {kind} {day}: not downloaded (python tools/adsb_history.py fetch {day} --kind {kind})")
+                continue
+            src = 2 if kind == "mlatonly" else 0
+            for j in J:
+                j["n_ac"][kind] = 0
+            for name, t in iter_traces(parts):
+                for j in J:
+                    r = rows_from_trace(t, box, j["t0"], j["t1"], src)
+                    if r:
+                        j["rows"] += r
+                        j["n_ac"][kind] += 1
+            print(f"[hist] {kind} {day}: read for {len(J)} capture(s)", flush=True)
+    return [write_truth(j) for j in jobs]
+
+
+def write_truth(j):
+    meta_path, meta, rows, n_ac, day = j["path"], j["meta"], j["rows"], j["n_ac"], j["day"]
     rows.sort(key=lambda r: r[3])
     stem = Path(meta_path).name.replace(".meta.json", "")
     out = Path(meta_path).with_name(stem + ".hist.adsb.jsonl")
@@ -177,7 +189,7 @@ def truth(meta_path, pad=300.0, kinds=("prod", "mlatonly")):
     m2["truth_source"] = f"adsb.lol globe_history {day} ({', '.join(f'{k}: {v}' for k, v in n_ac.items())})"
     m2_path = Path(meta_path).with_name(stem + ".hist.meta.json")
     json.dump(m2, open(m2_path, "w"), indent=1)
-    print(f"[hist] {len(rows)} trace points -> {out.name}; meta -> {m2_path.name}")
+    print(f"[hist] {Path(meta_path).name}: {sum(n_ac.values())} aircraft, {len(rows)} trace points -> {out.name}")
     return m2_path
 
 
@@ -191,4 +203,4 @@ if __name__ == "__main__":
     elif args[0] == "fetch":
         fetch(args[1], opt.get("--kind", "prod"))
     elif args[0] == "truth":
-        truth(args[1], float(opt.get("--pad", 300)), tuple(opt.get("--kinds", "prod,mlatonly").split(",")))
+        truth(args[1:], float(opt.get("--pad", 300)), tuple(opt.get("--kinds", "prod,mlatonly").split(",")))

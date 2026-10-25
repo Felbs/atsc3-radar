@@ -66,6 +66,15 @@ aircraft in it with the same code, and see whether one lands on
 match leaves a single-window, single-capture candidate, which is still
 below the bar (two windows ≥ 60 s apart).
 
+### Closed (2026-10-25): an ADS-B aircraft at the tower end
+
+adsb.lol's 2026-10-24 history, in the box that now spans receiver and
+tower (263 ADS-B + 129 MLAT-only aircraft in the window, against 106 in the
+original truth), has ICAO 0c414a, callsign HI1001, 3,850 m and 175 m/s,
+52 km from the WNUV tower. It explains 35 of the track's 35 points.
+`unmatched_tracks.py` on the history truth: 0 candidates. On all four
+captures every far track is now explained.
+
 ## What this pass established
 
 1. On four captures and 32 tracks of eight or more points beyond 5 km,

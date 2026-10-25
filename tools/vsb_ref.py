@@ -387,7 +387,10 @@ def field_sync_mask(a, is_sync, m0, u=None):
     return mask
 
 
-def build_block(x, fs, trellis=False):
+TRELLIS_BELOW_DB = 25.0
+
+
+def build_block(x, fs, trellis="auto"):
     """One block of capture -> (surv, ref_full, ref_blank) at FS3, plus diagnostics.
     trellis=True: symbol decisions from the Viterbi decoder (vsb_trellis.py)
     instead of the slicer -- the difference at 15 dB equalized SNR."""
@@ -398,6 +401,15 @@ def build_block(x, fs, trellis=False):
     zt, m0, start, r = to_tx_grid(zz, p0, per)
     a, is_sync, eq, u = equalize_and_slice(zt, m0, return_u=True)
     fmask = field_sync_mask(a, is_sync, m0, u)
+    # "auto": Viterbi decisions when the sync-symbol SNR is under 25 dB. A
+    # planted -50 dB echo in RF31 with noise added (2026-10-25): slicer vs
+    # trellis 29.1/30.8 dB at 20.5 dB sync SNR, 17.0/27.2 at 16.9, 9.4/20.8 at
+    # 14.4; identical at 29 dB. Cancellation reads WORSE with the trellis
+    # there -- slicer errors follow the noise and "cancel" it -- so it is not
+    # the measure of a reference at low SNR.
+    if trellis == "auto":
+        trellis = eq["sync_snr_db"] < TRELLIS_BELOW_DB
+    eq["trellis"] = bool(trellis)
     if trellis:
         import vsb_trellis
         a, changed = vsb_trellis.decide(u, a, m0, fmask)
@@ -598,7 +610,7 @@ def check(path, t0=1.0):
 def _radar_block(job):
     """One block: build the reference, then ECA + CAF + CFAR per dwell."""
     (path, fs, t_blk, block, dwell_n, taps, max_range_km, doppler, n_doppler, pfa, notch, maps_dir) = job[:12]
-    trellis = job[12] if len(job) > 12 else False
+    trellis = job[12] if len(job) > 12 else "auto"
     x = load(path, fs, t_blk, block + 0.02)
     if x is None:
         return t_blk, None, [], [], "short read"
@@ -652,7 +664,8 @@ def radar(argv):
     ap.add_argument("--notch-hz", type=float, default=15.0)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--save-maps", action="store_true")
-    ap.add_argument("--trellis", action="store_true", help="Viterbi-decoded symbol decisions (vsb_trellis.py)")
+    ap.add_argument("--trellis", default="auto", choices=("auto", "on", "off"),
+                    help="Viterbi-decoded symbol decisions (vsb_trellis.py); auto = per block, under 25 dB sync SNR")
     ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
     side = json.load(open(os.path.splitext(a.capture)[0] + ".json"))
@@ -666,12 +679,13 @@ def radar(argv):
     bin_m = C / FS3
     lam = C / float(json.load(open(a.station))["fc_hz"])
     print(f"[vsb ] {os.path.basename(a.capture)}  {secs:.0f} s in {a.block:.1f} s blocks x {a.jobs} jobs; "
-          f"FS3 {FS3/1e6:.4f} MS/s (bin {bin_m:.1f} m), dwell {a.dwell_samples/FS3*1e3:.0f} ms, ECA {a.taps} taps; decisions {'trellis' if a.trellis else 'slicer'}", flush=True)
+          f"FS3 {FS3/1e6:.4f} MS/s (bin {bin_m:.1f} m), dwell {a.dwell_samples/FS3*1e3:.0f} ms, ECA {a.taps} taps; decisions {a.trellis if a.trellis != 'on' else 'trellis'}", flush=True)
     jobs = []
     t_blk = a.t0
     while t_blk + a.block <= a.t0 + secs + 1e-6:
         jobs.append((a.capture, fs, round(t_blk, 6), a.block, a.dwell_samples, a.taps, a.max_range_km,
-                     a.doppler, a.n_doppler, a.pfa, a.notch_hz, maps_dir, a.trellis))
+                     a.doppler, a.n_doppler, a.pfa, a.notch_hz, maps_dir,
+                     {"auto": "auto", "on": True, "off": False}[a.trellis]))
         t_blk += a.block
     dets, diags, canc = [], [], []
     tw = time.time()

@@ -28,7 +28,18 @@ position is where the first one's velocity says it should be.
 
 Positions go to the json (lab/, gitignored); stdout prints counts only.
 
+HELD-OUT CHECK (--heldout <tracks...>): stations not used in the search. A
+peak's position and velocity predict its (range, Doppler) on each of them
+along its own path (+-15 s); the map there is ranked against 100 random
+paths (same altitude and speed, random place and heading). A held-out
+station "sees" the peak when it beats all 100. Null peaks get the same
+check, which calibrates it: in a busy sky the 60 s-shift null pairs real
+aircraft from different stations, so it is not empty, but a chance pairing
+puts no echo on a fourth tower. The 10-25 fix (102-108 MHz): 4 of 4 held-out
+towers see it at both fix times.
+
 Usage: python tools/fuse_fix.py <tracks_A.json> <tracks_B.json> <tracks_C.json> [--window 6] [--k 4]
+                                [--heldout <tracks_D.json> ...]
        (tracks files from fm_radar.py --save-maps on the same capture)
 """
 import argparse
@@ -69,6 +80,39 @@ def load_station(path):
     return dict(name=st.get("short_name", Path(path).stem),
                 T=tc.ecef(st["tx_lat"], st["tx_lon"], st.get("tx_alt_m", 200.0)),
                 lam=C / d["fc_hz"], rax=np.asarray(rax, float), dax=dax, t=t, lin=lin)
+
+
+def path_value(s, R, P0, v, tc_, span=15.0):
+    """Mean map value (linear SNR, median-removed) at a path's predicted cells on one station."""
+    dr = s["rax"][1] - s["rax"][0]; df = s["dax"][1] - s["dax"][0]
+    vals = []
+    for j, tj in enumerate(s["t"]):
+        if abs(tj - tc_) > span:
+            continue
+        P = P0 + v * (tj - tc_)
+        uT = (P - s["T"]) / np.linalg.norm(P - s["T"]); uR = (P - R) / np.linalg.norm(P - R)
+        rr = np.linalg.norm(P - s["T"]) + np.linalg.norm(P - R) - np.linalg.norm(s["T"] - R)
+        b = int(round((rr - s["rax"][0]) / dr))
+        k = int(round((float(-(uT + uR) @ v / s["lam"]) - s["dax"][0]) / df))
+        if MIN_BIN <= b < s["lin"].shape[1] and 1 <= k < s["lin"].shape[2] - 1:
+            vals.append(s["lin"][j, b, k - 1:k + 2].max())
+    return float(np.mean(vals)) if vals else float("nan")
+
+
+def heldout_seen(H, R, east, north, up, P0, v, tc_, alt, rng, n_rand=100, extent=80e3):
+    """How many held-out stations see the path: its value beats all n_rand random paths."""
+    sp = float(np.linalg.norm(v))
+    seen = 0
+    for s in H:
+        real = path_value(s, R, P0, v, tc_)
+        rnd = []
+        for _ in range(n_rand):
+            Pn = R + rng.uniform(-extent, extent) * east + rng.uniform(-extent, extent) * north + alt * up
+            h = rng.uniform(0, 2 * np.pi)
+            rnd.append(path_value(s, R, Pn, sp * (np.sin(h) * east + np.cos(h) * north), tc_))
+        rnd = np.array(rnd); rnd = rnd[np.isfinite(rnd)]
+        seen += bool(np.isfinite(real) and len(rnd) and real > rnd.max())
+    return seen
 
 
 @numba.njit(parallel=True, cache=False)
@@ -133,6 +177,7 @@ def main():
     ap.add_argument("--step-km", type=float, default=1.0)
     ap.add_argument("--alts", default="1000,2500,4000,6000,8500,11000")
     ap.add_argument("--peaks", type=int, default=6, help="peaks examined per window")
+    ap.add_argument("--heldout", nargs="*", default=[], help="tracks files of stations NOT used in the search")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 
@@ -278,12 +323,37 @@ def main():
     for tr in tracks:
         print(f"    {len(tr)} fixes over {tr[-1]['t_s']-tr[0]['t_s']:.1f} s, projection misses "
               f"{', '.join(f'{f_['link_miss_m']/1e3:.2f}' for f_ in tr[1:])} km")
+    heldout = None
+    if a.heldout:
+        H = [load_station(p) for p in a.heldout]
+        rng = np.random.default_rng(0)
+        def check(p, shift_k=None):
+            P = G[p["p"]]; vv = p["v"][0] * east + p["v"][1] * north
+            tcen = float(t[p["w0"]] + hop * a.window / 2)
+            return heldout_seen(H, R, east, north, up, P, vv, tcen, float(ecef_to_lla(P)[2]), rng)
+        tw = time.time()
+        null_seen = [check(p_) for v_ in nulls.values() for p_ in sorted(v_, key=lambda q: -q["score"])[:10]]
+        real_top = sorted(real, key=lambda q: -q["score"])[:20]
+        real_seen = [check(p_) for p_ in real_top]
+        print(f"  held-out check ({len(H)} stations: {', '.join(h['name'] for h in H)}; {time.time()-tw:.0f} s)")
+        print(f"    null top peaks seen by k held-out stations: " + " ".join(str(x) for x in sorted(null_seen, reverse=True)))
+        print(f"    real top peaks:                             " + " ".join(str(x) for x in real_seen))
+        for p_, k_ in zip(real_top, real_seen):
+            for f in fixes:
+                if f["t_s"] == float(t[p_["w0"]] + hop * a.window / 2) and abs(f["score"] - p_["score"]) < 1e-6:
+                    f["heldout_seen"] = k_
+        heldout = dict(stations=[h["name"] for h in H], null_seen=null_seen,
+                       real_top=[dict(t_s=float(t[p_["w0"]] + hop * a.window / 2), score=p_["score"], seen=k_,
+                                      **dict(zip(("lat", "lon", "alt_m"), map(float, ecef_to_lla(G[p_["p"]])))),
+                                      ve_ms=p_["v"][0], vn_ms=p_["v"][1])
+                                 for p_, k_ in zip(real_top, real_seen)])
     for f in fixes:
         f.pop("_P")
     out = a.out or str(Path(a.tracks[0]).parent / "fuse_fix_v2.json")
     json.dump(dict(stations=[s["name"] for s in S], window=a.window, k=a.k, threshold=thr,
                    null_top={k: sorted((p["score"] for p in v), reverse=True)[:10] for k, v in nulls.items()},
-                   real_top=rs[:20], null_follow_support=null_support, fixes=fixes, tracks=tracks), open(out, "w"), indent=1)
+                   real_top=rs[:20], null_follow_support=null_support, fixes=fixes, tracks=tracks,
+                   heldout=heldout), open(out, "w"), indent=1)
     print(f"-> {out}")
 
 

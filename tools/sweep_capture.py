@@ -16,7 +16,7 @@ would spend it again.
 iq_capture takes the fleet radio lock per leg; a leg refused by the lock
 is recorded as skipped, not retried, so a radiosonde hunt wins.
 
-Usage: python tools/sweep_capture.py [--only fm|vhf|uhf|atsc3] [--secs-tv 60] [--secs-fm 120]
+Usage: python tools/sweep_capture.py [--only fm|vhf|uhf|atsc3] [--secs-tv 60] [--secs-fm 120] [--rf 7,15]
 """
 import argparse
 import json
@@ -58,6 +58,9 @@ def legs(a):
     if a.only in (None, "atsc3"):
         L.append(dict(kind="atsc3", tag="rf25", fc=tv_fc(25), rate=6.912e6, ant="Antenna B",
                       rfgain=2, ifgr=32, secs=a.secs_tv, rf=25))
+    if getattr(a, "rf", None):
+        keep = {int(x) for x in a.rf.split(",")}
+        L = [l for l in L if l.get("rf") in keep]
     return L
 
 
@@ -66,6 +69,7 @@ def main():
     ap.add_argument("--only", default=None, choices=("fm", "vhf", "uhf", "atsc3"))
     ap.add_argument("--secs-tv", type=float, default=60.0)
     ap.add_argument("--secs-fm", type=float, default=120.0)
+    ap.add_argument("--rf", default=None, help="comma list: keep only TV legs on these RF channels")
     a = ap.parse_args()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SZ")
     sweep_dir = LAB / f"sweep_{stamp}"

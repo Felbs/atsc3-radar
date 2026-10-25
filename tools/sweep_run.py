@@ -63,9 +63,13 @@ def summarize_tracks(path):
                longest_track=best["n"] if best else 0,
                longest_walk_pct=best["agreement_pct"] if best else None,
                cancellation_db=round(float(sorted(canc)[len(canc) // 2]), 1) if canc else None)
-    if canc and not blocks:
+    if d.get("status"):
+        # FM: fm_radar found no carrier, only a neighbour's HD Radio sideband
+        # (17 of 59 in the 10-25 sweep cancelled 0.1-0.7 dB for this reason)
+        out["status"] = d["status"]
+        out["locked"] = False
+    elif canc and not blocks:
         # FM: a reference that cancels < 10 dB did not reconstruct the station
-        # (17 of 59 in the 10-25 sweep: each 200 kHz from a station >= 22 dB)
         out["locked"] = out["cancellation_db"] >= 10.0
     if blocks:
         out["eq_snr_db"] = round(sorted(b["eq_snr_db"] for b in blocks)[len(blocks) // 2], 1)
